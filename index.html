@@ -212,7 +212,7 @@ const monthEnd=m=>{const d=pISO(m+'-01');d.setMonth(d.getMonth()+1);d.setDate(0)
 const newId=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36);
 const byName=(a,b)=>(a.name||'').localeCompare(b.name||'','ar');
 
-const KIND={five:'اختبار الخمسة',three:'اختبار الثلاثة',khatma:'اختبار الختمة',tajweed:'اختبار التجويد'};
+const KIND={five:'اختبار الخمسة',three:'اختبار الثلاثة',ten:'اختبار العشرة',twenty:'اختبار العشرين',khatma:'اختبار الختمة',tajweed:'اختبار التجويد'};
 const STAT={scheduled:'مجدولة',passed:'اجتازت',repeat:'تُعاد'};
 const LEVELS=['مبتدئة','متوسطة','متقنة'];
 const TABS=[['home','الرئيسية'],['students','الطالبات'],['exams','الاختبارات'],['khatm','الخاتمات'],['att','الحضور والغياب'],['report','تقرير المعلمة'],['dis','الفصل'],['halaqat','الحلقات']];
@@ -257,10 +257,11 @@ function studentsF(h,incl){h=h||S.hf;return [...S.students.values()].filter(s=>(
 const lastH=(s,t)=>(s.history||[]).filter(x=>x.type===t).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
 function excuseActive(s,on){on=on||today();const x=s.excuse;return x&&x.to&&x.to>=on&&(!x.from||x.from<=addDays(on,30))?x:null}
 function excuseOn(s,d){const x=s.excuse;return x&&x.to&&x.to>=d&&(!x.from||x.from<=d)}
+const STEPK={5:'five',3:'three',10:'ten',20:'twenty'},KSTEP={five:5,three:3,ten:10,twenty:20},SNAME={5:'الخمسة',3:'الثلاثة',10:'العشرة',20:'العشرين'};
 function due(s,step){
-  const juz=+s.juz||0,last=+(step===5?s.last5:s.last3)||0,next=last+step;
+  const juz=+s.juz||0,last=+s['last'+step]||0,next=last+step;
   if(juz<next)return null;
-  const kind=step===5?'five':'three';
+  const kind=STEPK[step];
   const sch=(IDX.byStudent.get(s.id)||[]).find(e=>e.kind===kind&&e.status==='scheduled'&&+e.milestone===next);
   return {next,sch,kind};
 }
@@ -308,6 +309,7 @@ function tags(s,opt={}){
   const x=excuseActive(s);if(x)h+=`<span class="tag t-ex" title="${esc(x.reason||'')}">بعذر${x.reason?' · '+esc(x.reason):''} حتى ${fD(x.to)}</span>`;
   if(!opt.no5){const d=due(s,5);if(d)h+=d.sch?`<span class="tag t-sch">الخمسة ${fD(d.sch.date)}</span>`:`<span class="tag t-due">عليها اختبار الخمسة</span>`;}
   if(!opt.no3){const d=due(s,3);if(d)h+=d.sch?`<span class="tag t-sch">الثلاثة ${fD(d.sch.date)}</span>`:`<span class="tag t-due">عليها اختبار الثلاثة</span>`;}
+  for(const st of [10,20]){const d=due(s,st);if(d)h+=d.sch?`<span class="tag t-sch">${SNAME[st]} ${fD(d.sch.date)}</span>`:`<span class="tag t-due">عليها اختبار ${SNAME[st]}</span>`;}
   if((+s.juz||0)>=30)h+=`<span class="tag t-k">${s.khatmaDone?'خاتمة':'أتمّت الحفظ'}</span>`;
   if(s.demo)h+=`<span class="tag t-demo">تجريبي</span>`;
   return h;
@@ -343,6 +345,7 @@ function vHome(){
   const st=studentsF();
   const d5=st.map(s=>[s,due(s,5)]).filter(x=>x[1]);
   const d3=st.map(s=>[s,due(s,3)]).filter(x=>x[1]);
+  const d10=st.map(s=>[s,due(s,10)]).filter(x=>x[1]);const d20=st.map(s=>[s,due(s,20)]).filter(x=>x[1]);
   const exc=st.filter(s=>excuseActive(s));
   const ws=weekStart(today()),we=addDays(ws,6);
   const tw=tally(ws,we,S.hf);
@@ -359,6 +362,8 @@ function vHome(){
     <div class="stat"><b>${AR(st.length)}</b><span>طالبة</span></div>
     <div class="stat ${d5.length?'alert':''}"><b>${AR(d5.length)}</b><span>عليهن اختبار الخمسة</span></div>
     <div class="stat ${d3.length?'alert':''}"><b>${AR(d3.length)}</b><span>عليهن اختبار الثلاثة</span></div>
+    <div class="stat ${d10.length?'alert':''}"><b>${AR(d10.length)}</b><span>عليهن اختبار العشرة</span></div>
+    <div class="stat ${d20.length?'alert':''}"><b>${AR(d20.length)}</b><span>عليهن اختبار العشرين</span></div>
     <div class="stat ${abs.length?'bad':''}"><b>${AR(abs.length)}</b><span>غائبات هذا الأسبوع</span></div>
     <div class="stat"><b>${AR(exc.length)}</b><span>معذورات حاليًا</span></div>
     <div class="stat"><b>${AR(kh.length)}</b><span>خاتمات</span></div>
@@ -372,6 +377,10 @@ function vHome(){
       <div class="list">${d5.length?d5.map(dueRow).join(''):empty('لا توجد طالبات عليهن اختبار الخمسة')}</div></section>
     <section class="panel"><div class="ph"><h2 class="grow">تنبيه اختبار الثلاثة</h2><span class="count">${AR(d3.length)}</span></div>
       <div class="list">${d3.length?d3.map(dueRow).join(''):empty('لا توجد طالبات عليهن اختبار الثلاثة')}</div></section>
+    <section class="panel"><div class="ph"><h2 class="grow">تنبيه اختبار العشرة</h2><span class="count">${AR(d10.length)}</span></div>
+      <div class="list">${d10.length?d10.map(dueRow).join(''):empty('لا توجد طالبات عليهن اختبار العشرة')}</div></section>
+    <section class="panel"><div class="ph"><h2 class="grow">تنبيه اختبار العشرين</h2><span class="count">${AR(d20.length)}</span></div>
+      <div class="list">${d20.length?d20.map(dueRow).join(''):empty('لا توجد طالبات عليهن اختبار العشرين')}</div></section>
     <section class="panel"><div class="ph"><h2 class="grow">غياب هذا الأسبوع</h2><span class="sub">${fD(ws)} – ${fD(we)}</span></div>
       <div class="list">${abs.length?abs.map(([s,t])=>`<button class="row" data-act="openStudent" data-id="${s.id}"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))} · ${t.ad.sort().map(fDay).join('، ')}</div></div><div class="tags"><span class="tag t-bad">${AR(t.a)} غياب</span>${excuseActive(s)?'<span class="tag t-ex">بعذر</span>':''}</div></button>`).join(''):empty('لا غياب مسجّل هذا الأسبوع')}</div></section>
     <section class="panel"><div class="ph"><h2 class="grow">طالبات بعذر</h2><span class="count">${AR(exc.length)}</span></div>
@@ -391,7 +400,7 @@ function vStudents(){
 function stuListHTML(){
   const q=S.q.trim();
   let st=studentsF(undefined,true).filter(s=>S.sf==='dis'?s.status==='dismissed':s.status!=='dismissed').filter(s=>!q||(s.name||'').includes(q));
-  if(S.sf==='due')st=st.filter(s=>due(s,5)||due(s,3));
+  if(S.sf==='due')st=st.filter(s=>due(s,5)||due(s,3)||due(s,10)||due(s,20));
   if(S.sf==='exc')st=st.filter(s=>excuseActive(s));
   if(S.sf==='khatm')st=st.filter(s=>(+s.juz||0)>=30);
   if(S.sf==='near')st=st.filter(s=>(+s.juz||0)>=25&&(+s.juz||0)<30);
@@ -407,11 +416,11 @@ function vExams(){
   const res=ex.filter(e=>e.status!=='scheduled').sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,40);
   const exRow=e=>{const s=S.students.get(e.student)||{name:'—'};return `<button class="row" data-act="openExam" data-id="${e.id}"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))}${e.milestone?' · حتى الجزء '+AR(e.milestone):''}${e.examiner?' · '+esc(e.examiner):''}</div></div><div class="tags"><span class="tag ${e.status==='passed'?'t-ok':e.status==='repeat'?'t-bad':'t-sch'}">${STAT[e.status]} ${fD(e.date)}</span>${e.grade?`<span class="tag t-k">${esc(e.grade)}</span>`:''}</div></button>`};
   let top='';
-  if(k==='five'||k==='three'){
-    const step=k==='five'?5:3;
+  if(KSTEP[k]){
+    const step=KSTEP[k];
     const d=st.map(s=>[s,due(s,step)]).filter(x=>x[1]&&!x[1].sch);
     top=`<section class="panel"><div class="ph"><h2 class="grow">مستحقّات لم تُجدول</h2><span class="count">${AR(d.length)}</span></div>
-      <p class="hint" style="margin:0">تظهر الطالبة هنا تلقائيًا حين يصل حفظها إلى الجزء التالي من مضاعفات ${step===5?'الخمسة':'الثلاثة'} ولم تجتز اختباره بعد.</p>
+      <p class="hint" style="margin:0">تظهر الطالبة هنا تلقائيًا حين يصل حفظها إلى الجزء التالي من مضاعفات ${SNAME[step]} ولم تجتز اختباره بعد.</p>
       <div class="list">${d.length?d.map(([s,x])=>`<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))} · حفظت ${AR(s.juz)} · آخر اختبار حتى الجزء ${AR(x.next-step)}</div></div><div class="acts"><button class="btn sm" data-act="newExam" data-sid="${s.id}" data-kind="${k}" data-m="${x.next}">جدولة</button></div></div>`).join(''):empty('لا توجد مستحقّات')}</div></section>`;
   }
   if(k==='tajweed'){
@@ -419,7 +428,7 @@ function vExams(){
     top=`<section class="panel"><h2>مستويات التجويد</h2><div class="lvl">${c.map(([l,n])=>`<div><b>${AR(n)}</b><span class="sub">${l}</span></div>`).join('')}<div><b>${AR(none)}</b><span class="sub">بدون تقييم</span></div></div>
       <p class="hint" style="margin:0">يُحدَّث مستوى الطالبة من ملفها، أو من تقرير المعلمة الشهري عند تسليمه.</p></section>`;
   }
-  return `<div class="tools"><div class="grow">${seg('examTab',k,[['five','اختبار الخمسة'],['three','اختبار الثلاثة'],['tajweed','التجويد']])}</div><button class="btn pri" data-act="newExam" data-kind="${k}" ${S.readOnly?'disabled':''}>اختبار جديد</button></div>
+  return `<div class="tools"><div class="grow">${seg('examTab',k,[['five','اختبار الخمسة'],['three','اختبار الثلاثة'],['ten','اختبار العشرة'],['twenty','اختبار العشرين'],['tajweed','التجويد']])}</div><button class="btn pri" data-act="newExam" data-kind="${k}" ${S.readOnly?'disabled':''}>اختبار جديد</button></div>
   ${top}
   <div class="grid2">
     <section class="panel"><div class="ph"><h2 class="grow">مواعيد قادمة</h2><span class="count">${AR(sch.length)}</span></div><div class="list">${sch.length?sch.map(exRow).join(''):empty('لا مواعيد مجدولة')}</div></section>
@@ -571,6 +580,8 @@ function shStudent(id){
     <label class="f">الأجزاء المحفوظة<input type="number" name="juz" min="0" max="30" value="${esc(s?.juz??0)}"></label>
     <label class="f">آخر اختبار خمسة اجتازته (حتى الجزء)<input type="number" name="last5" min="0" max="30" step="5" value="${esc(s?.last5??0)}"></label>
     <label class="f">آخر اختبار ثلاثة اجتازته (حتى الجزء)<input type="number" name="last3" min="0" max="30" step="3" value="${esc(s?.last3??0)}"></label>
+    <label class="f">آخر اختبار عشرة اجتازته (حتى الجزء)<input type="number" name="last10" min="0" max="30" step="10" value="${esc(s?.last10??0)}"></label>
+    <label class="f">آخر اختبار عشرين اجتازته (حتى الجزء)<input type="number" name="last20" min="0" max="30" step="20" value="${esc(s?.last20??0)}"></label>
     <label class="f">مستوى التجويد<select name="tajweed"><option value="">—</option>${LEVELS.map(l=>`<option ${s?.tajweed===l?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">الدفعة (للخاتمات)<input type="text" name="batch" value="${esc(s?.batch||'')}" placeholder="مثال: دفعة ١٤٤٧"></label>
     <fieldset style="grid-column:1/-1;border:1px dashed var(--line);border-radius:10px;padding:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:10px;margin:0">
@@ -691,10 +702,10 @@ async function loadDemo(){
   const H=[['demo-h1','حلقة النور','أ. مريم'],['demo-h2','حلقة الهدى','أ. سارة'],['demo-h3','حلقة الإتقان','أ. هدى']];
   const names=['آمنة خالد','بتول سمير','جنى ياسر','دانة محمود','رهف أحمد','زينب علي','سلمى خالد','شهد إبراهيم','صفية حسن','غدير يوسف','فاطمة عمر','لينا مصطفى','مريم سعيد','نور عادل','هبة طارق','وعد ماجد','يارا فادي','ريم نبيل'];
   const juz=[10,5,3,30,30,12,27,6,20,30,9,15,2,18,29,25,4,30];
-  const td=today(),T=[];const S5=new Set([0,1,8,15]),S3=new Set([5,7,13]);
+  const td=today(),T=[];const S5=new Set([0,1,8,15]),S3=new Set([5,7,13]),S10=new Set([0,11]),S20=new Set([8]);
   H.forEach(([id,name,teacher])=>T.push(()=>put('halaqat',id,{name,teacher,demo:true})));
   const studs=names.map((n,i)=>{const j=juz[i];let l5=Math.floor(j/5)*5,l3=Math.floor(j/3)*3;if(S5.has(i))l5-=5;if(S3.has(i))l3-=3;
-    const s={name:n,halaqa:H[i%3][0],juz:j,last5:l5,last3:l3,tajweed:LEVELS[i%3],demo:true};
+    const s={name:n,halaqa:H[i%3][0],juz:j,last5:l5,last3:l3,last10:Math.floor(j/10)*10-(S10.has(i)?10:0),last20:Math.floor(j/20)*20-(S20.has(i)?20:0),tajweed:LEVELS[i%3],demo:true};
     if(j>=30)s.batch=i<10?'الدفعة الأولى':'الدفعة الثانية';if(i===3)s.khatmaDone=addDays(td,-40);
     if(i===12){s.status='dismissed';s.history=[{type:'dismissed',date:addDays(td,-20),reason:'تكرار الغياب بدون عذر'}]}
     if(i===1){s.history=[{type:'dismissed',date:addDays(td,-120),reason:'انقطاع عن الحلقة'},{type:'returned',date:addDays(td,-35),note:'عادت بطلب وليّة الأمر'}]}
@@ -790,13 +801,13 @@ document.addEventListener('submit',async e=>{
   if(!S.admin){toast('التعديل هنا للإدارة والإشراف فقط');return}
   if(f.dataset.form==='student'){
     const id=S.sheet.id||newId();const prev=S.students.get(id);
-    const s={...(prev?strip(prev):{}),name:g('name'),halaqa:g('halaqa'),juz:num(g('juz')),last5:num(g('last5')),last3:num(g('last3')),tajweed:g('tajweed'),batch:g('batch')};
+    const s={...(prev?strip(prev):{}),name:g('name'),halaqa:g('halaqa'),juz:num(g('juz')),last5:num(g('last5')),last3:num(g('last3')),last10:num(g('last10')),last20:num(g('last20')),tajweed:g('tajweed'),batch:g('batch')};
     if(g('exTo'))s.excuse={reason:g('exReason'),from:g('exFrom'),to:g('exTo')};else delete s.excuse;
     if(!s.name)return;try{await put('students',id,s);toast('حُفظ')}catch(err){return}closeSheet();
   }
   if(f.dataset.form==='bulk'){
     const h=g('halaqa');const lines=g('list').split(/\n/).map(l=>l.trim()).filter(Boolean);
-    const T=lines.map(l=>{const [n,j]=l.split(/[،,]/);const juz=num(j||0);return ()=>put('students',newId(),{name:n.trim(),halaqa:h,juz,last5:Math.floor(juz/5)*5,last3:Math.floor(juz/3)*3,tajweed:'',batch:''})});
+    const T=lines.map(l=>{const [n,j]=l.split(/[،,]/);const juz=num(j||0);return ()=>put('students',newId(),{name:n.trim(),halaqa:h,juz,last5:Math.floor(juz/5)*5,last3:Math.floor(juz/3)*3,last10:Math.floor(juz/10)*10,last20:Math.floor(juz/20)*20,tajweed:'',batch:''})});
     closeSheet();toast('جارٍ إضافة '+AR(T.length)+' طالبة…');await pool(T);toast('أُضيفت '+AR(T.length)+' طالبة');
   }
   if(f.dataset.form==='exam'){
@@ -809,6 +820,7 @@ document.addEventListener('submit',async e=>{
     if(s&&ex.status==='passed'){const c=strip(s);let ch=false;
       if(ex.kind==='five'&&ex.milestone>(+s.last5||0)){c.last5=ex.milestone;ch=true}
       if(ex.kind==='three'&&ex.milestone>(+s.last3||0)){c.last3=ex.milestone;ch=true}
+      for(const kk of ['ten','twenty']){const f='last'+KSTEP[kk];if(ex.kind===kk&&ex.milestone>(+s[f]||0)){c[f]=ex.milestone;ch=true}}
       if(ex.kind==='khatma'&&!s.khatmaDone){c.khatmaDone=ex.date;ch=true}
       if(ch)try{await put('students',s.id,c)}catch(err){}}
     toast('حُفظ الاختبار');back?shStudent(back):closeSheet();
@@ -835,7 +847,7 @@ document.addEventListener('submit',async e=>{
 });
 
 /* ---------- boot ---------- */
-const LS='bilquran-demo-v5';let pt;
+const LS='bilquran-demo-v7';let pt;
 function persist(){clearTimeout(pt);pt=setTimeout(()=>{try{const o={meta:S.meta};for(const k of Object.values(MAPOF))o[k]=[...S[k].values()];localStorage.setItem(LS,JSON.stringify(o))}catch(e){}},300)}
 (async()=>{
   let ok=false;
