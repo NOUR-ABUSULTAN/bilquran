@@ -161,7 +161,7 @@ td.num{text-align:center}
 .lvl div{flex:1;min-width:110px;background:var(--sunk);border-radius:10px;padding:10px 12px}
 .lvl b{font-family:var(--f-display);font-size:1.4rem;font-weight:700;display:block;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
-.teacher [data-act="newExam"],.teacher [data-act="addStudents"],.teacher [data-act="newHalaqa"],.teacher [data-act="saveName"],.teacher [data-act="demo"],.teacher [data-act="demoDel"],.teacher [data-act="clearExcuse"],.teacher [data-act="delStudent"],.teacher [data-act="delExam"],.teacher [data-act="delHalaqa"],.teacher [data-act="repApprove"],.teacher form[data-form] button[type=submit]{display:none!important}
+.teacher [data-act="newExam"],.teacher [data-act="newSard"],.teacher [data-act="addStudents"],.teacher [data-act="newHalaqa"],.teacher [data-act="saveName"],.teacher [data-act="demo"],.teacher [data-act="demoDel"],.teacher [data-act="clearExcuse"],.teacher [data-act="delStudent"],.teacher [data-act="delExam"],.teacher [data-act="delHalaqa"],.teacher [data-act="repApprove"],.teacher form[data-form] button[type=submit]{display:none!important}
 .teacher form[data-form] :is(input,select,textarea){pointer-events:none;background:var(--sunk)}
 </style>
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -212,11 +212,11 @@ const KIND={five:'اختبار الخمسة',three:'اختبار الثلاثة'
 const STAT={scheduled:'مجدولة',passed:'اجتازت',repeat:'تُعاد'};
 const LEVELS=['مبتدئة','متوسطة','متقنة'];
 const TABS=[['home','الرئيسية'],['students','الطالبات'],['exams','الاختبارات'],['khatm','الخاتمات'],['att','الحضور والغياب'],['report','تقرير المعلمة'],['halaqat','الحلقات']];
-const COLS={halaqat:'halaqat',students:'students',exams:'exams',att:'attendance',monthly:'monthly'};
-const MAPOF={halaqat:'halaqat',students:'students',exams:'exams',attendance:'att',monthly:'monthly'};
+const COLS={halaqat:'halaqat',students:'students',exams:'exams',att:'attendance',monthly:'monthly',sard:'sard'};
+const MAPOF={halaqat:'halaqat',students:'students',exams:'exams',attendance:'att',monthly:'monthly',sard:'sard'};
 
 const S={mode:'local',db:null,readOnly:false,admin:true,role:'admin',loaded:{},
-  halaqat:new Map(),students:new Map(),exams:new Map(),att:new Map(),monthly:new Map(),meta:{},
+  halaqat:new Map(),students:new Map(),exams:new Map(),att:new Map(),monthly:new Map(),sard:new Map(),meta:{},
   tab:'home',hf:'all',q:'',sf:'all',examTab:'five',attTab:'mark',attH:'',attDate:today(),weekOf:weekStart(today()),attMonth:thisMonth(),
   repH:'',repMonth:thisMonth(),drafts:{},sheet:null,arm:null};
 try{const p=JSON.parse(localStorage.getItem('tahfeedh-ui')||'{}');if(p.tab)S.tab=p.tab;if(p.hf)S.hf=p.hf;}catch(e){}
@@ -265,6 +265,27 @@ function khatmaState(s){
   if(sch)return {k:'sch',t:'اختبار الختمة '+fD(sch.date),e:sch};
   return {k:'due',t:'بانتظار اختبار الختمة'};
 }
+const sardEvery=()=>+S.meta.sardEvery||21;
+const dBetween=(a,b)=>Math.round((pISO(b)-pISO(a))/864e5);
+function batchInfo(b){
+  const ex=[...S.sard.values()].filter(x=>x.batch===b);
+  const hist=ex.filter(x=>x.status!=='scheduled').sort((x,y)=>(y.date||'').localeCompare(x.date||''));
+  const sch=ex.filter(x=>x.status==='scheduled').sort((x,y)=>(x.date||'').localeCompare(y.date||''))[0]||null;
+  const done=hist[0]||null;const next=done?addDays(done.date,sardEvery()):null;const left=next?dBetween(today(),next):null;
+  const st=sch?'sch':(!done||left<=0)?'due':left<=3?'soon':'ok';
+  return {b,done,hist,sch,next,left,st,rank:{due:0,soon:1,sch:2,ok:3}[st]};
+}
+function batchList(){
+  const m=new Map();for(const s of studentsF())if((+s.juz||0)>=30&&s.batch)m.set(s.batch,(m.get(s.batch)||0)+1);
+  return [...m].map(([b,n])=>({...batchInfo(b),n})).sort((a,b)=>a.rank-b.rank||(a.next||'').localeCompare(b.next||''));
+}
+function sardTag(x){
+  if(x.st==='sch')return `<span class="tag t-sch">مجدول ${fD(x.sch.date)}</span>`;
+  if(x.st==='due')return x.done&&x.left<0?`<span class="tag t-bad">متأخر ${AR(-x.left)} يومًا</span>`:`<span class="tag t-due">عليهن اختبار الآن</span>`;
+  if(x.st==='soon')return `<span class="tag t-due">بعد ${AR(x.left)} أيام</span>`;
+  return `<span class="tag t-ok">القادم ${fD(x.next)}</span>`;
+}
+const sardBtn=x=>`<button class="btn sm" data-act="${x.sch?'openSard':'newSard'}" data-id="${x.sch?x.sch.id:''}" data-b="${esc(x.b)}">${x.sch?'النتيجة':'تسجيل الاختبار'}</button>`;
 function tally(from,to,h){
   const t=new Map();
   for(const a of S.att.values()){
@@ -320,6 +341,7 @@ function vHome(){
   const tw=tally(ws,we,S.hf);
   const abs=st.map(s=>[s,tw.get(s.id)]).filter(x=>x[1]&&x[1].a>0).sort((a,b)=>b[1].a-a[1].a);
   const kh=st.filter(s=>(+s.juz||0)>=30);
+  const bl=batchList();const bd=bl.filter(x=>x.st==='due'||x.st==='soon');
   const m=thisMonth();
   const hs=halaqatArr().filter(h=>S.hf==='all'||h.id===S.hf);
   const sub=hs.filter(h=>(S.monthly.get(h.id+'_'+m)||{}).submitted).length;
@@ -331,10 +353,14 @@ function vHome(){
     <div class="stat ${d5.length?'alert':''}"><b>${AR(d5.length)}</b><span>عليهن اختبار الخمسة</span></div>
     <div class="stat ${d3.length?'alert':''}"><b>${AR(d3.length)}</b><span>عليهن اختبار الثلاثة</span></div>
     <div class="stat ${abs.length?'bad':''}"><b>${AR(abs.length)}</b><span>غائبات هذا الأسبوع</span></div>
+    <div class="stat"><b>${AR(exc.length)}</b><span>معذورات حاليًا</span></div>
     <div class="stat"><b>${AR(kh.length)}</b><span>خاتمات</span></div>
+    <div class="stat ${bd.length?'alert':''}"><b>${AR(bd.length)}</b><span>دفعات خاتمات عليها اختبار</span></div>
     <div class="stat"><b>${AR(sub)}/${AR(hs.length)}</b><span>تقارير ${fM(m).split(' ')[0]} المسلّمة</span></div>
   </div>
   <div class="grid2">
+    <section class="panel"><div class="ph"><h2 class="grow">اختبار الخاتمات الدوري</h2><span class="sub">كل ${AR(sardEvery())} يومًا</span></div>
+      <div class="list">${bl.length?bl.map(x=>`<div class="row static"><div style="min-width:0"><div class="nm">${esc(x.b)}</div><div class="sub">${AR(x.n)} خاتمة · ${x.done?'آخر اختبار '+fD(x.done.date):'لم يُختبرن بعد'}</div></div><div class="acts">${sardTag(x)}${sardBtn(x)}</div></div>`).join(''):empty('لا توجد دفعات خاتمات بعد')}</div></section>
     <section class="panel"><div class="ph"><h2 class="grow">تنبيه اختبار الخمسة</h2><span class="count">${AR(d5.length)}</span></div>
       <div class="list">${d5.length?d5.map(dueRow).join(''):empty('لا توجد طالبات عليهن اختبار الخمسة')}</div></section>
     <section class="panel"><div class="ph"><h2 class="grow">تنبيه اختبار الثلاثة</h2><span class="count">${AR(d3.length)}</span></div>
@@ -400,8 +426,8 @@ function vKhatm(){
   const groups=new Map();for(const s of kh){const b=s.batch||'بدون دفعة';if(!groups.has(b))groups.set(b,[]);groups.get(b).push(s)}
   const keys=[...groups.keys()].sort((a,b)=>a==='بدون دفعة'?1:b==='بدون دفعة'?-1:a.localeCompare(b,'ar'));
   return `<section class="panel"><div class="ph"><h2 class="grow">الخاتمات حسب الدفعة</h2><span class="count">${AR(kh.length)}</span></div>
-    <p class="hint" style="margin:0">كل طالبة أتمّت ٣٠ جزءًا تظهر هنا. حدّدي دفعتها من ملفها، وسجّلي اختبار الختمة لاعتمادها.</p>
-    ${keys.length?keys.map(b=>{const g=groups.get(b).sort(byName);const ok=g.filter(s=>s.khatmaDone).length;return `<div class="batch"><div class="ph"><h3 class="grow">${esc(b)}</h3><span class="sub">${AR(ok)} معتمدة من ${AR(g.length)}</span></div><div class="list">${g.map(s=>{const k=khatmaState(s);return `<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))}${s.khatmaDone?' · اعتُمدت '+fD(s.khatmaDone):''}</div></div><div class="acts"><span class="tag ${k.k==='ok'?'t-ok':k.k==='sch'?'t-sch':'t-due'}">${k.t}</span>${k.k==='due'?`<button class="btn sm" data-act="newExam" data-sid="${s.id}" data-kind="khatma" data-m="30">جدولة</button>`:k.k==='sch'?`<button class="btn sm" data-act="openExam" data-id="${k.e.id}">النتيجة</button>`:''}<button class="btn sm" data-act="openStudent" data-id="${s.id}">الملف</button></div></div>`}).join('')}</div></div>`}).join(''):empty('لا توجد خاتمات بعد')}
+    <p class="hint" style="margin:0">كل طالبة أتمّت ٣٠ جزءًا تظهر هنا. حدّدي دفعتها من ملفها، وسجّلي اختبار الختمة لاعتمادها. كل دفعة تُختبر كل ${AR(sardEvery())} يومًا، ويظهر التنبيه قبل الموعد بثلاثة أيام.</p>
+    ${keys.length?keys.map(b=>{const g=groups.get(b).sort(byName);const ok=g.filter(s=>s.khatmaDone).length;return `<div class="batch"><div class="ph"><h3 class="grow">${esc(b)}</h3><span class="sub">${AR(ok)} معتمدة من ${AR(g.length)}</span></div>${(()=>{if(b==='بدون دفعة')return '<div class="hint">حدّدي دفعة لهؤلاء الطالبات من ملفاتهن ليظهر لهن تنبيه الاختبار الدوري.</div>';const bi=batchInfo(b);return `<div class="ph" style="gap:6px">${sardTag(bi)}<span class="sub grow">${bi.done?'آخر اختبار دوري '+fD(bi.done.date):'لم يُسجَّل اختبار دوري بعد'}</span>${bi.hist.slice(0,3).map(h=>`<button class="chip" data-act="openSard" data-id="${h.id}">${fD(h.date)} · ${AR(Object.values(h.results||{}).filter(r=>r.r==='pass').length)} اجتازت</button>`).join('')}${sardBtn(bi)}</div>`})()}<div class="list">${g.map(s=>{const k=khatmaState(s);return `<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))}${s.khatmaDone?' · اعتُمدت '+fD(s.khatmaDone):''}</div></div><div class="acts"><span class="tag ${k.k==='ok'?'t-ok':k.k==='sch'?'t-sch':'t-due'}">${k.t}</span>${k.k==='due'?`<button class="btn sm" data-act="newExam" data-sid="${s.id}" data-kind="khatma" data-m="30">جدولة</button>`:k.k==='sch'?`<button class="btn sm" data-act="openExam" data-id="${k.e.id}">النتيجة</button>`:''}<button class="btn sm" data-act="openStudent" data-id="${s.id}">الملف</button></div></div>`}).join('')}</div></div>`}).join(''):empty('لا توجد خاتمات بعد')}
   </section>
   <section class="panel"><div class="ph"><h2 class="grow">قاربن الختم</h2><span class="count">${AR(near.length)}</span></div><div class="list">${near.length?near.map(s=>stuRow(s,`<span class="tag t-k">بقي ${AR(30-(+s.juz||0))}</span>`)).join(''):empty('لا توجد طالبات فوق ٢٥ جزءًا')}</div></section>`;
 }
@@ -472,7 +498,7 @@ function vReport(){
 
 function vHalaqat(){
   const hs=halaqatArr();const hasDemo=[...S.students.values(),...S.halaqat.values()].some(x=>x.demo);
-  return `<section class="panel"><h2>اسم الأكاديمية</h2><div class="tools"><input class="grow" type="text" id="acInput" value="${esc(S.meta.name||'')}" placeholder="أكاديمية بالقرآن"><button class="btn" data-act="saveName" ${S.readOnly?'disabled':''}>حفظ</button></div></section>
+  return `<section class="panel"><h2>إعدادات الأكاديمية</h2><div class="fgrid"><label class="f">اسم الأكاديمية<input type="text" id="acInput" value="${esc(S.meta.name||'')}" placeholder="أكاديمية بالقرآن"></label><label class="f">اختبار الخاتمات الدوري كل (يوم)<input type="number" id="sardIn" min="1" max="90" value="${sardEvery()}"></label></div><div class="tools"><button class="btn" data-act="saveName" ${S.readOnly?'disabled':''}>حفظ الإعدادات</button></div></section>
   <section class="panel"><div class="ph"><h2 class="grow">الحلقات</h2><button class="btn pri" data-act="newHalaqa" ${S.readOnly?'disabled':''}>حلقة جديدة</button></div>
     <div class="list">${hs.length?hs.map(h=>{const n=[...S.students.values()].filter(s=>s.halaqa===h.id).length;return `<button class="row" data-act="openHalaqa" data-id="${h.id}"><div style="min-width:0"><div class="nm">${esc(h.name)}</div><div class="sub">${esc(h.teacher||'بدون معلمة')}</div></div><div class="tags"><span class="count">${AR(n)} طالبة</span>${h.demo?'<span class="tag t-demo">تجريبي</span>':''}</div></button>`}).join(''):empty('لا توجد حلقات بعد')}</div></section>
   <section class="panel"><h2>البيانات التجريبية</h2><p class="hint" style="margin:0">ترجع المنصة لحالتها الأولى: ٣ حلقات و١٨ طالبة مع حضور واختبارات وتقرير شهري.</p>
@@ -571,7 +597,23 @@ function shHalaqa(id){
     <div class="foot" style="grid-column:1/-1"><div class="l">${h?(n?`<span class="hint">لا يمكن حذف حلقة فيها ${AR(n)} طالبة</span>`:`<button type="button" class="btn danger ${S.arm==='delH'?'armed':''}" data-act="delHalaqa">${S.arm==='delH'?'اضغطي للتأكيد':'حذف الحلقة'}</button>`):''}</div><button class="btn pri" type="submit" ${S.readOnly?'disabled':''}>حفظ</button></div>
   </form>`);
 }
-function reopen(){const s=S.sheet;if(!s)return;if(s.type==='student')shStudent(s.id);else if(s.type==='exam')shExam({id:s.id,back:s.back});else if(s.type==='halaqa')shHalaqa(s.id)}
+function shSard(o){
+  const x=o.id?S.sard.get(o.id):null;const batch=x?.batch||o.batch;if(!batch)return;
+  S.sheet={type:'sard',id:o.id||null,batch};
+  const st=[...S.students.values()].filter(s=>(+s.juz||0)>=30&&s.batch===batch&&(S.admin||s.halaqa===S.role)).sort(byName);
+  const R=x?.results||{};
+  openSheet(`${shHead('الاختبار الدوري · '+esc(batch))}
+  <form data-form="sard" style="display:flex;flex-direction:column;gap:12px">
+    <div class="fgrid"><label class="f">التاريخ<input type="date" name="date" required value="${esc(x?.date||today())}"></label>
+    <label class="f">الحالة<select name="status"><option value="done" ${x?.status!=='scheduled'?'selected':''}>تمّ الاختبار</option><option value="scheduled" ${x?.status==='scheduled'?'selected':''}>مجدول</option></select></label>
+    <label class="f">المختبِرة<input type="text" name="examiner" value="${esc(x?.examiner||'')}"></label></div>
+    <p class="hint" style="margin:0">سجّلي نتيجة كل خاتمة. الموعد القادم يُحسب تلقائيًا بعد ${AR(sardEvery())} يومًا من آخر اختبار تمّ.</p>
+    <div class="list">${st.length?st.map(s=>{const r=R[s.id]||{};return `<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))}</div></div><div class="acts"><select name="r_${s.id}" aria-label="نتيجة ${esc(s.name)}" style="width:auto"><option value="">—</option><option value="pass" ${r.r==='pass'?'selected':''}>اجتازت</option><option value="repeat" ${r.r==='repeat'?'selected':''}>تُعاد</option><option value="absent" ${r.r==='absent'?'selected':''}>غائبة</option></select><input type="text" name="g_${s.id}" value="${esc(r.g||'')}" placeholder="الدرجة" style="width:84px"></div></div>`}).join(''):empty('لا خاتمات في هذه الدفعة')}</div>
+    <label class="f">ملاحظات<input type="text" name="note" value="${esc(x?.note||'')}"></label>
+    <div class="foot"><div class="l">${x?`<button type="button" class="btn danger ${S.arm==='delD'?'armed':''}" data-act="delSard">${S.arm==='delD'?'اضغطي للتأكيد':'حذف'}</button>`:''}</div><button class="btn pri" type="submit" ${S.readOnly?'disabled':''}>حفظ</button></div>
+  </form>`);
+}
+function reopen(){const s=S.sheet;if(!s)return;if(s.type==='student')shStudent(s.id);else if(s.type==='exam')shExam({id:s.id,back:s.back});else if(s.type==='halaqa')shHalaqa(s.id);else if(s.type==='sard')shSard({id:s.id,batch:s.batch})}
 
 /* ---------- actions ---------- */
 const num=(v,max)=>{const n=parseInt(String(v).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)),10);return isNaN(n)?0:Math.max(0,Math.min(max??30,n))};
@@ -619,7 +661,7 @@ async function loadDemo(){
   H.forEach(([id,name,teacher])=>T.push(()=>put('halaqat',id,{name,teacher,demo:true})));
   const studs=names.map((n,i)=>{const j=juz[i];let l5=Math.floor(j/5)*5,l3=Math.floor(j/3)*3;if(S5.has(i))l5-=5;if(S3.has(i))l3-=3;
     const s={name:n,halaqa:H[i%3][0],juz:j,last5:l5,last3:l3,tajweed:LEVELS[i%3],demo:true};
-    if(j>=30)s.batch=i<10?'دفعة ١٤٤٦':'دفعة ١٤٤٧';if(i===3)s.khatmaDone=addDays(td,-40);
+    if(j>=30)s.batch=i<10?'الدفعة الأولى':'الدفعة الثانية';if(i===3)s.khatmaDone=addDays(td,-40);
     if(i===6)s.excuse={reason:'سفر',from:addDays(td,-3),to:addDays(td,6)};
     return ['demo-s'+i,s]});
   studs.forEach(([id,s])=>T.push(()=>put('students',id,s)));
@@ -636,6 +678,9 @@ async function loadDemo(){
       T.push(()=>put('attendance',`${hid}_${d}`,{halaqa:hid,date:d,marks,demo:true}))})}
   const rows={};studs.filter(([,s])=>s.halaqa==='demo-h1').forEach(([sid,s],i)=>rows[sid]={pages:String(8+i*2),juz:String(s.juz),tajweed:s.tajweed,note:''});
   T.push(()=>put('monthly',`demo-h1_${thisMonth()}`,{halaqa:'demo-h1',month:thisMonth(),rows,note:'حلقة منتظمة هذا الشهر.',submitted:true,applied:true,submittedAt:new Date().toISOString(),demo:true}));
+  T.push(()=>put('sard','demo-d1',{batch:'الدفعة الأولى',date:addDays(td,-45),status:'done',examiner:'لجنة الأكاديمية',note:'',results:{'demo-s3':{r:'pass',g:'٩٤'},'demo-s4':{r:'pass',g:'٨٩'},'demo-s9':{r:'pass',g:'٩١'}},demo:true}));
+  T.push(()=>put('sard','demo-d2',{batch:'الدفعة الأولى',date:addDays(td,-24),status:'done',examiner:'لجنة الأكاديمية',note:'',results:{'demo-s3':{r:'pass',g:'٩٦'},'demo-s4':{r:'pass',g:'٩٠'},'demo-s9':{r:'repeat',g:''}},demo:true}));
+  T.push(()=>put('sard','demo-d3',{batch:'الدفعة الثانية',date:addDays(td,-10),status:'done',examiner:'أ. هدى',note:'',results:{'demo-s17':{r:'pass',g:'٨٨'}},demo:true}));
   await pool(T);toast('جاهزة: تصفّحي التبويبات');S.tab='home';schedule();
 }
 async function delDemo(){
@@ -644,13 +689,13 @@ async function delDemo(){
   await pool(T);S.drafts={};toast('حُذفت البيانات التجريبية');schedule();
 }
 
-const ADM=new Set(['newExam','addStudents','newHalaqa','saveName','demo','demoDel','clearExcuse','delStudent','delExam','delHalaqa','repApprove']);
+const ADM=new Set(['newSard','delSard','newExam','addStudents','newHalaqa','saveName','demo','demoDel','clearExcuse','delStudent','delExam','delHalaqa','repApprove']);
 document.addEventListener('click',async ev=>{
   const b=ev.target.closest('[data-act]');
   if(!b){if(ev.target.id==='sheet')closeSheet();return}
   const a=b.dataset.act,v=b.dataset.v;
   if(!S.admin&&ADM.has(a)){toast('هذا الإجراء للإدارة والإشراف فقط');return}
-  if(a!=='demoDel'&&a!=='delStudent'&&a!=='delExam'&&a!=='delHalaqa'&&S.arm){S.arm=null}
+  if(a!=='demoDel'&&a!=='delStudent'&&a!=='delExam'&&a!=='delHalaqa'&&a!=='delSard'&&S.arm){S.arm=null}
   switch(a){
     case 'tab':S.tab=v;render();window.scrollTo(0,0);break;
     case 'seg':S[b.dataset.k]=v;render();break;
@@ -662,6 +707,9 @@ document.addEventListener('click',async ev=>{
     case 'openHalaqa':shHalaqa(b.dataset.id);break;
     case 'newHalaqa':shHalaqa(null);break;
     case 'close':closeSheet();break;
+    case 'newSard':shSard({batch:b.dataset.b});break;
+    case 'openSard':shSard({id:b.dataset.id});break;
+    case 'delSard':if(S.arm!=='delD'){S.arm='delD';reopen()}else{const id=S.sheet.id;S.arm=null;closeSheet();try{await del('sard',id);toast('حُذف الاختبار')}catch(e){}}break;
     case 'goReport':S.repH=b.dataset.id;S.tab='report';render();window.scrollTo(0,0);break;
     case 'repH':S.repH=v;render();break;
     case 'week':S.weekOf=addDays(S.weekOf,+v);render();break;
@@ -670,8 +718,8 @@ document.addEventListener('click',async ev=>{
     case 'repSave':saveReport(false);break;
     case 'repSubmit':saveReport(true,false);break;
     case 'repApprove':if(S.admin)saveReport(true,true);break;
-    case 'saveName':{const n=$('#acInput').value.trim();if(!S.db){S.meta={name:n};persist();render();toast('حُفظ الاسم');break}
-      enqueue('meta',()=>S.db.doc('meta/academy').set({name:n})).then(()=>toast('حُفظ الاسم')).catch(onErr);break}
+    case 'saveName':{const n=$('#acInput').value.trim();const se=num($('#sardIn').value,90)||21;if(!S.db){S.meta={...S.meta,name:n,sardEvery:se};persist();render();toast('حُفظت الإعدادات');break}
+      enqueue('meta',()=>S.db.doc('meta/academy').set({...S.meta,name:n,sardEvery:se})).then(()=>toast('حُفظت الإعدادات')).catch(onErr);break}
     case 'demo':loadDemo();break;
     case 'reset':for(const k of Object.values(MAPOF))S[k]=new Map();S.meta={};S.drafts={};try{localStorage.removeItem(LS)}catch(e){}await loadDemo();break;
     case 'demoDel':if(S.arm!=='demoDel'){S.arm='demoDel';render()}else{S.arm=null;delDemo()}break;
@@ -729,6 +777,14 @@ document.addEventListener('submit',async e=>{
       if(ch)try{await put('students',s.id,c)}catch(err){}}
     toast('حُفظ الاختبار');back?shStudent(back):closeSheet();
   }
+  if(f.dataset.form==='sard'){
+    const id=S.sheet.id||newId();const results={};
+    for(const [k,v] of fd.entries()){if(k.startsWith('r_')){const sid=k.slice(2);const gr=(fd.get('g_'+sid)||'').toString().trim();if(v||gr)results[sid]={r:v,g:gr}}}
+    const d={batch:S.sheet.batch,date:g('date'),status:g('status'),examiner:g('examiner'),note:g('note'),results};
+    if(S.sard.get(id)?.demo)d.demo=true;
+    try{await put('sard',id,d)}catch(err){return}
+    toast('حُفظ الاختبار الدوري');closeSheet();
+  }
   if(f.dataset.form==='halaqa'){
     const id=S.sheet.id||newId();const prev=S.halaqat.get(id);
     try{await put('halaqat',id,{...(prev?strip(prev):{}),name:g('name'),teacher:g('teacher')});toast('حُفظت الحلقة')}catch(err){return}closeSheet();
@@ -736,7 +792,7 @@ document.addEventListener('submit',async e=>{
 });
 
 /* ---------- boot ---------- */
-const LS='bilquran-demo-v1';let pt;
+const LS='bilquran-demo-v2';let pt;
 function persist(){clearTimeout(pt);pt=setTimeout(()=>{try{const o={meta:S.meta};for(const k of Object.values(MAPOF))o[k]=[...S[k].values()];localStorage.setItem(LS,JSON.stringify(o))}catch(e){}},300)}
 (async()=>{
   let ok=false;
