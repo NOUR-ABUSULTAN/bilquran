@@ -130,6 +130,9 @@ td.num{text-align:center}
 .mk button[aria-pressed="true"][data-m="p"]{background:var(--ok);border-color:var(--ok);color:var(--surface)}
 .mk button[aria-pressed="true"][data-m="a"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
 .mk button[aria-pressed="true"][data-m="e"]{background:var(--gold);border-color:var(--gold);color:var(--surface)}
+.mk button[aria-pressed="true"][data-m="t"]{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.teacher .admin-only{display:none!important}
+.t-taj{background:var(--brand-soft);color:var(--brand)}
 .batch{display:flex;flex-direction:column;gap:6px}
 .batch h3{font-family:var(--f-display);font-weight:700;color:var(--gold);font-size:1rem}
 .rep{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(4,minmax(0,1fr));gap:8px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
@@ -203,6 +206,7 @@ const addDays=(s,n)=>{const d=pISO(s);d.setDate(d.getDate()+n);return iso(d)};
 const weekStart=s=>{const d=pISO(s);d.setDate(d.getDate()-((d.getDay()+1)%7));return iso(d)};
 const fD=s=>s?new Intl.DateTimeFormat('ar-EG',{day:'numeric',month:'short'}).format(pISO(s)):'';
 const fDay=s=>new Intl.DateTimeFormat('ar-EG',{weekday:'short',day:'numeric',month:'short'}).format(pISO(s));
+const fDY=s=>s?new Intl.DateTimeFormat('ar-EG',{day:'numeric',month:'short',year:'numeric'}).format(pISO(s)):'';
 const fM=m=>new Intl.DateTimeFormat('ar-EG',{month:'long',year:'numeric'}).format(pISO(m+'-01'));
 const monthEnd=m=>{const d=pISO(m+'-01');d.setMonth(d.getMonth()+1);d.setDate(0);return iso(d)};
 const newId=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36);
@@ -211,7 +215,7 @@ const byName=(a,b)=>(a.name||'').localeCompare(b.name||'','ar');
 const KIND={five:'اختبار الخمسة',three:'اختبار الثلاثة',khatma:'اختبار الختمة',tajweed:'اختبار التجويد'};
 const STAT={scheduled:'مجدولة',passed:'اجتازت',repeat:'تُعاد'};
 const LEVELS=['مبتدئة','متوسطة','متقنة'];
-const TABS=[['home','الرئيسية'],['students','الطالبات'],['exams','الاختبارات'],['khatm','الخاتمات'],['att','الحضور والغياب'],['report','تقرير المعلمة'],['halaqat','الحلقات']];
+const TABS=[['home','الرئيسية'],['students','الطالبات'],['exams','الاختبارات'],['khatm','الخاتمات'],['att','الحضور والغياب'],['report','تقرير المعلمة'],['dis','الفصل'],['halaqat','الحلقات']];
 const COLS={halaqat:'halaqat',students:'students',exams:'exams',att:'attendance',monthly:'monthly',sard:'sard'};
 const MAPOF={halaqat:'halaqat',students:'students',exams:'exams',attendance:'att',monthly:'monthly',sard:'sard'};
 
@@ -249,7 +253,8 @@ let IDX={byStudent:new Map()};
 function reindex(){const m=new Map();for(const e of S.exams.values()){if(!m.has(e.student))m.set(e.student,[]);m.get(e.student).push(e)}for(const a of m.values())a.sort((x,y)=>(y.date||'').localeCompare(x.date||''));IDX.byStudent=m}
 const hName=id=>(S.halaqat.get(id)||{}).name||'بدون حلقة';
 const halaqatArr=()=>[...S.halaqat.values()].filter(h=>S.admin||h.id===S.role).sort(byName);
-function studentsF(h){h=h||S.hf;return [...S.students.values()].filter(s=>h==='all'||s.halaqa===h).sort(byName)}
+function studentsF(h,incl){h=h||S.hf;return [...S.students.values()].filter(s=>(h==='all'||s.halaqa===h)&&(incl||s.status!=='dismissed')).sort(byName)}
+const lastH=(s,t)=>(s.history||[]).filter(x=>x.type===t).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
 function excuseActive(s,on){on=on||today();const x=s.excuse;return x&&x.to&&x.to>=on&&(!x.from||x.from<=addDays(on,30))?x:null}
 function excuseOn(s,d){const x=s.excuse;return x&&x.to&&x.to>=d&&(!x.from||x.from<=d)}
 function due(s,step){
@@ -290,7 +295,7 @@ function tally(from,to,h){
   const t=new Map();
   for(const a of S.att.values()){
     if(a.date<from||a.date>to)continue;if(h&&h!=='all'&&a.halaqa!==h)continue;
-    for(const [sid,m] of Object.entries(a.marks||{})){const o=t.get(sid)||{p:0,a:0,e:0,ad:[]};o[m]=(o[m]||0)+1;if(m==='a')o.ad.push(a.date);t.set(sid,o)}
+    for(const [sid,m] of Object.entries(a.marks||{})){const o=t.get(sid)||{p:0,a:0,e:0,t:0,ad:[]};o[m]=(o[m]||0)+1;if(m==='a')o.ad.push(a.date);t.set(sid,o)}
   }
   return t;
 }
@@ -298,6 +303,8 @@ function tally(from,to,h){
 /* ---------- small renderers ---------- */
 function tags(s,opt={}){
   let h='';
+  if(s.status==='dismissed'){const l=lastH(s,'dismissed');return `<span class="tag t-bad">مفصولة${l?' منذ '+fDY(l.date):''}</span>`}
+  if((s.history||[]).some(x=>x.type==='dismissed')){const r=lastH(s,'returned');h+=`<span class="tag t-ex">عادت بعد فصل${r?' · '+fD(r.date):''}</span>`}
   const x=excuseActive(s);if(x)h+=`<span class="tag t-ex" title="${esc(x.reason||'')}">بعذر${x.reason?' · '+esc(x.reason):''} حتى ${fD(x.to)}</span>`;
   if(!opt.no5){const d=due(s,5);if(d)h+=d.sch?`<span class="tag t-sch">الخمسة ${fD(d.sch.date)}</span>`:`<span class="tag t-due">عليها اختبار الخمسة</span>`;}
   if(!opt.no3){const d=due(s,3);if(d)h+=d.sch?`<span class="tag t-sch">الثلاثة ${fD(d.sch.date)}</span>`:`<span class="tag t-due">عليها اختبار الثلاثة</span>`;}
@@ -378,16 +385,17 @@ function vStudents(){
   return `<section class="panel">
     <div class="ph"><h2 class="grow">الطالبات</h2><button class="btn pri" data-act="addStudents" ${S.readOnly?'disabled':''}>إضافة طالبات</button></div>
     <div class="tools"><input class="grow" type="search" id="stuQ" placeholder="ابحثي بالاسم" value="${esc(S.q)}"></div>
-    <div class="chips" role="group">${[['all','الكل'],['due','عليها اختبار'],['exc','بعذر'],['khatm','خاتمات'],['near','قاربن الختم']].map(([v,l])=>`<button class="chip" data-act="sf" data-v="${v}" aria-pressed="${S.sf===v}">${l}</button>`).join('')}</div>
+    <div class="chips" role="group">${[['all','الكل'],['due','عليها اختبار'],['exc','بعذر'],['khatm','خاتمات'],['near','قاربن الختم'],['ret','عادت بعد فصل'],['dis','مفصولات']].map(([v,l])=>`<button class="chip" data-act="sf" data-v="${v}" aria-pressed="${S.sf===v}">${l}</button>`).join('')}</div>
     <div id="stuList"></div></section>`;
 }
 function stuListHTML(){
   const q=S.q.trim();
-  let st=studentsF().filter(s=>!q||(s.name||'').includes(q));
+  let st=studentsF(undefined,true).filter(s=>S.sf==='dis'?s.status==='dismissed':s.status!=='dismissed').filter(s=>!q||(s.name||'').includes(q));
   if(S.sf==='due')st=st.filter(s=>due(s,5)||due(s,3));
   if(S.sf==='exc')st=st.filter(s=>excuseActive(s));
   if(S.sf==='khatm')st=st.filter(s=>(+s.juz||0)>=30);
   if(S.sf==='near')st=st.filter(s=>(+s.juz||0)>=25&&(+s.juz||0)<30);
+  if(S.sf==='ret')st=st.filter(s=>(s.history||[]).some(x=>x.type==='dismissed'));
   return `<div class="sub" style="margin-bottom:4px">${AR(st.length)} طالبة</div><div class="list">${st.length?st.map(s=>stuRow(s)).join(''):empty(S.students.size?'لا نتائج مطابقة':'لم تُضَف طالبات بعد')}</div>`;
 }
 
@@ -439,13 +447,13 @@ function vAtt(){
   const top=`<div class="tools">${seg('attTab',S.attTab,[['mark','تسجيل الحضور'],['week','الأسبوع'],['month','إحصائية الشهر']])}</div>`;
   if(S.attTab==='mark'){
     const st=studentsF(S.attH);const doc=S.att.get(S.attH+'_'+S.attDate)||{marks:{}};const mk=doc.marks||{};
-    const n={p:0,a:0,e:0};Object.values(mk).forEach(v=>n[v]=(n[v]||0)+1);
+    const n={p:0,a:0,e:0,t:0};Object.values(mk).forEach(v=>n[v]=(n[v]||0)+1);
     return top+`<section class="panel">
       <div class="fgrid"><label class="f">الحلقة<select id="attH">${hOpts(S.attH)}</select></label><label class="f">التاريخ<input type="date" id="attDate" value="${S.attDate}"></label></div>
-      <div class="ph"><div class="grow sub">${fDay(S.attDate)} · حاضرات ${AR(n.p)} · غائبات ${AR(n.a)} · بعذر ${AR(n.e)} · لم تُسجَّل ${AR(Math.max(0,st.length-n.p-n.a-n.e))}</div><button class="btn sm" data-act="allPresent" ${S.readOnly?'disabled':''}>تسجيل البقية حاضرات</button></div>
+      <div class="ph"><div class="grow sub">${fDay(S.attDate)} · حاضرات ${AR(n.p)} · غائبات ${AR(n.a)} · بعذر ${AR(n.e)} · تجويد ${AR(n.t)} · لم تُسجَّل ${AR(Math.max(0,st.length-n.p-n.a-n.e-n.t))}</div><button class="btn sm" data-act="allPresent" ${S.readOnly?'disabled':''}>تسجيل البقية حاضرات</button></div>
       <div class="list">${st.length?st.map(s=>{const m=mk[s.id];const ex=excuseOn(s,S.attDate);return `<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${ex?`<span class="tag t-ex">بعذر: ${esc(s.excuse.reason||'')} حتى ${fD(s.excuse.to)}</span>`:AR(s.juz)+' جزءًا'}</div></div>
-        <div class="mk" role="group" aria-label="حضور ${esc(s.name)}">${[['p','ح','حاضرة'],['a','غ','غائبة'],['e','ع','بعذر']].map(([v,l,t])=>`<button data-act="mark" data-sid="${s.id}" data-m="${v}" aria-pressed="${m===v}" title="${t}" ${S.readOnly?'disabled':''}>${l}</button>`).join('')}</div></div>`}).join(''):empty('لا طالبات في هذه الحلقة')}</div>
-      <p class="hint" style="margin:0">ح = حاضرة، غ = غائبة، ع = غياب بعذر. اضغطي الزر نفسه مرة ثانية لإلغاء التسجيل.</p></section>`;
+        <div class="mk" role="group" aria-label="حضور ${esc(s.name)}">${[['p','ح','حاضرة'],['a','غ','غائبة'],['e','ع','بعذر'],['t','ت','تجويد']].map(([v,l,t])=>`<button data-act="mark" data-sid="${s.id}" data-m="${v}" aria-pressed="${m===v}" title="${t}" ${S.readOnly?'disabled':''}>${l}</button>`).join('')}</div></div>`}).join(''):empty('لا طالبات في هذه الحلقة')}</div>
+      <p class="hint" style="margin:0">ح = حاضرة، غ = غائبة، ع = غياب بعذر، ت = تجويد. اضغطي الزر نفسه مرة ثانية لإلغاء التسجيل.</p></section>`;
   }
   if(S.attTab==='week'){
     const ws=S.weekOf,we=addDays(ws,6);const t=tally(ws,we,S.hf);
@@ -457,16 +465,34 @@ function vAtt(){
       <div class="list">${abs.length?abs.map(([s,x])=>`<button class="row" data-act="openStudent" data-id="${s.id}"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))}${x.ad.length?' · غابت: '+x.ad.sort().map(fDay).join('، '):''}</div></div><div class="tags">${x.a?`<span class="tag t-bad">${AR(x.a)} غياب</span>`:''}${x.e?`<span class="tag t-ex">${AR(x.e)} بعذر</span>`:''}</div></button>`).join(''):empty('لا غياب في هذا الأسبوع')}</div></section>`;
   }
   const m=S.attMonth,from=m+'-01',to=monthEnd(m);const t=tally(from,to,S.hf);
-  const st=studentsF().map(s=>{const x=t.get(s.id)||{p:0,a:0,e:0};const tot=x.p+x.a+x.e;return {s,x,tot,r:tot?Math.round(x.p/tot*100):null}}).sort((a,b)=>b.x.a-a.x.a||byName(a.s,b.s));
-  const sum=st.reduce((o,r)=>(o.p+=r.x.p,o.a+=r.x.a,o.e+=r.x.e,o),{p:0,a:0,e:0});const all=sum.p+sum.a+sum.e;
+  const st=studentsF().map(s=>{const x=t.get(s.id)||{p:0,a:0,e:0,t:0};const tot=x.p+x.a+x.e+(x.t||0);return {s,x,tot,r:tot?Math.round((x.p+(x.t||0))/tot*100):null}}).sort((a,b)=>b.x.a-a.x.a||byName(a.s,b.s));
+  const sum=st.reduce((o,r)=>(o.p+=r.x.p,o.a+=r.x.a,o.e+=r.x.e,o.t+=(r.x.t||0),o),{p:0,a:0,e:0,t:0});const all=sum.p+sum.a+sum.e+sum.t;
   return top+`<section class="panel">
     <div class="fgrid"><label class="f">الشهر<input type="month" id="attMonth" value="${m}"></label></div>
-    <div class="stats"><div class="stat"><b>${all?AR(Math.round(sum.p/all*100))+'٪':'—'}</b><span>نسبة الحضور</span></div><div class="stat bad"><b>${AR(sum.a)}</b><span>مرات الغياب</span></div><div class="stat"><b>${AR(sum.e)}</b><span>غياب بعذر</span></div><div class="stat alert"><b>${AR(st.filter(r=>r.x.a>=3).length)}</b><span>طالبات غبن ٣ مرات فأكثر</span></div></div>
-    <div class="scroll"><table><thead><tr><th>الطالبة</th><th>الحلقة</th><th>حضور</th><th>غياب</th><th>بعذر</th><th>النسبة</th></tr></thead><tbody>
-    ${st.length?st.map(r=>`<tr><td>${esc(r.s.name)}</td><td>${esc(hName(r.s.halaqa))}</td><td class="num">${AR(r.x.p)}</td><td class="num">${r.x.a?`<span class="tag t-bad">${AR(r.x.a)}</span>`:AR(0)}</td><td class="num">${AR(r.x.e)}</td><td class="num">${r.r===null?'—':AR(r.r)+'٪'}</td></tr>`).join(''):`<tr><td colspan="6">لا بيانات</td></tr>`}
+    <div class="stats"><div class="stat"><b>${all?AR(Math.round((sum.p+sum.t)/all*100))+'٪':'—'}</b><span>نسبة الحضور</span></div><div class="stat"><b>${AR(sum.t)}</b><span>تجويد</span></div><div class="stat bad"><b>${AR(sum.a)}</b><span>مرات الغياب</span></div><div class="stat"><b>${AR(sum.e)}</b><span>غياب بعذر</span></div><div class="stat alert"><b>${AR(st.filter(r=>r.x.a>=3).length)}</b><span>طالبات غبن ٣ مرات فأكثر</span></div></div>
+    <div class="scroll"><table><thead><tr><th>الطالبة</th><th>الحلقة</th><th>حضور</th><th>غياب</th><th>بعذر</th><th>تجويد</th><th>النسبة</th></tr></thead><tbody>
+    ${st.length?st.map(r=>`<tr><td>${esc(r.s.name)}</td><td>${esc(hName(r.s.halaqa))}</td><td class="num">${AR(r.x.p)}</td><td class="num">${r.x.a?`<span class="tag t-bad">${AR(r.x.a)}</span>`:AR(0)}</td><td class="num">${AR(r.x.e)}</td><td class="num">${r.x.t?`<span class="tag t-taj">${AR(r.x.t)}</span>`:AR(0)}</td><td class="num">${r.r===null?'—':AR(r.r)+'٪'}</td></tr>`).join(''):`<tr><td colspan="7">لا بيانات</td></tr>`}
     </tbody></table></div></section>`;
 }
 
+function vDis(){
+  const all=studentsF(undefined,true);
+  const dis=all.filter(s=>s.status==='dismissed').sort((a,b)=>((lastH(b,'dismissed')||{}).date||'').localeCompare((lastH(a,'dismissed')||{}).date||''));
+  const ret=all.filter(s=>s.status!=='dismissed'&&(s.history||[]).some(x=>x.type==='dismissed'));
+  const act=all.filter(s=>s.status!=='dismissed');
+  return `<div class="stats"><div class="stat ${dis.length?'bad':''}"><b>${AR(dis.length)}</b><span>مفصولات حاليًا</span></div><div class="stat"><b>${AR(ret.length)}</b><span>عادت بعد فصل</span></div></div>
+  <section class="panel admin-only"><h2>فصل طالبة</h2>
+    <form data-form="dismissPick" class="fgrid" style="gap:10px">
+      <label class="f" style="grid-column:1/-1">الطالبة<select name="student" required><option value="">اختاري الطالبة</option>${act.map(s=>`<option value="${s.id}">${esc(s.name)} — ${esc(hName(s.halaqa))}</option>`).join('')}</select></label>
+      <label class="f">تاريخ الفصل<input type="date" name="date" required value="${today()}"></label>
+      <label class="f">سبب الفصل<input type="text" name="reason" placeholder="مثال: تكرار الغياب"></label>
+      <div class="foot" style="grid-column:1/-1"><span class="hint">تختفي الطالبة من الحضور والتنبيهات، ويبقى ملفها وسجلها محفوظًا.</span><button class="btn danger" type="submit" ${S.readOnly?'disabled':''}>فصل الطالبة</button></div>
+    </form></section>
+  <section class="panel"><div class="ph"><h2 class="grow">المفصولات حاليًا</h2><span class="count">${AR(dis.length)}</span></div>
+    <div class="list">${dis.length?dis.map(s=>{const l=lastH(s,'dismissed')||{};return `<div class="row static"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))} · ${AR(s.juz)} جزءًا${l.reason?' · '+esc(l.reason):''}</div></div><div class="acts"><span class="tag t-bad">فُصلت ${fDY(l.date)}</span><button class="btn sm" data-act="openStudent" data-id="${s.id}">الملف والإعادة</button></div></div>`}).join(''):empty('لا توجد طالبات مفصولات')}</div></section>
+  <section class="panel"><div class="ph"><h2 class="grow">عادت بعد فصل</h2><span class="count">${AR(ret.length)}</span></div>
+    <div class="list">${ret.length?ret.map(s=>{const d=lastH(s,'dismissed')||{},r=lastH(s,'returned')||{};const n=(s.history||[]).filter(x=>x.type==='dismissed').length;return `<button class="row" data-act="openStudent" data-id="${s.id}"><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${esc(hName(s.halaqa))} · فُصلت ${fDY(d.date)}${d.reason?' ('+esc(d.reason)+')':''} · عادت ${fDY(r.date)}</div></div><div class="tags">${n>1?`<span class="tag t-bad">فُصلت ${AR(n)} مرات</span>`:''}<span class="tag t-ex">عادت بعد فصل</span></div></button>`}).join(''):empty('لا توجد طالبات عائدات بعد فصل')}</div></section>`;
+}
 function repDraft(h,m){
   const key=h+'_'+m;
   if(!S.drafts[key]){const d=S.monthly.get(key);S.drafts[key]=d?JSON.parse(JSON.stringify(strip(d))):{halaqa:h,month:m,rows:{},note:'',submitted:false};}
@@ -485,8 +511,8 @@ function vReport(){
     <div class="ph"><div class="grow"><h2>${esc(h.name)}</h2><div class="sub">${esc(h.teacher||'')} · ${AR(st.length)} طالبة</div></div>${doc&&doc.submitted&&doc.applied===false?`<span class="tag t-due">سُلِّم ${fD((doc.submittedAt||'').slice(0,10))} · بانتظار الاعتماد</span>`:doc&&doc.submitted?`<span class="tag t-ok">معتمد ${fD((doc.submittedAt||'').slice(0,10))}</span>`:doc?'<span class="tag t-sch">مسودة محفوظة</span>':'<span class="tag t-due">لم يُبدأ</span>'}</div>
     <p class="hint" style="margin:0">الحضور والغياب يُحسب تلقائيًا من سجل الحضور. المعلمة تعبّئ الإنجاز: الصفحات المحفوظة هذا الشهر، والجزء الذي وصلت إليه، ومستوى التجويد.</p>
     <div class="rep head"><div>الطالبة والحضور</div><div>صفحات هذا الشهر</div><div>وصلت إلى الجزء</div><div>التجويد</div><div>ملاحظة</div></div>
-    ${st.length?st.map(s=>{const r=d.rows[s.id]||{};const x=t.get(s.id)||{p:0,a:0,e:0};return `<div class="rep">
-      <div class="nmcol"><span class="nm">${esc(s.name)}</span><span class="sub">ح ${AR(x.p)} · غ ${AR(x.a)} · ع ${AR(x.e)} · الحالي ${AR(s.juz)} جزءًا</span></div>
+    ${st.length?st.map(s=>{const r=d.rows[s.id]||{};const x=t.get(s.id)||{p:0,a:0,e:0,t:0};return `<div class="rep">
+      <div class="nmcol"><span class="nm">${esc(s.name)}</span><span class="sub">ح ${AR(x.p)} · غ ${AR(x.a)} · ع ${AR(x.e)} · ت ${AR(x.t||0)} · الحالي ${AR(s.juz)} جزءًا</span></div>
       <label class="f"><span class="lbl">صفحات هذا الشهر</span><input type="number" min="0" max="604" inputmode="numeric" data-rep="${s.id}" data-f="pages" value="${esc(r.pages??'')}" placeholder="٠"></label>
       <label class="f"><span class="lbl">وصلت إلى الجزء</span><input type="number" min="0" max="30" inputmode="numeric" data-rep="${s.id}" data-f="juz" value="${esc(r.juz??'')}" placeholder="${AR(s.juz)}"></label>
       <label class="f"><span class="lbl">التجويد</span><select data-rep="${s.id}" data-f="tajweed"><option value="">—</option>${LEVELS.map(l=>`<option ${r.tajweed===l?'selected':''}>${l}</option>`).join('')}</select></label>
@@ -500,7 +526,7 @@ function vHalaqat(){
   const hs=halaqatArr();const hasDemo=[...S.students.values(),...S.halaqat.values()].some(x=>x.demo);
   return `<section class="panel"><h2>إعدادات الأكاديمية</h2><div class="fgrid"><label class="f">اسم الأكاديمية<input type="text" id="acInput" value="${esc(S.meta.name||'')}" placeholder="أكاديمية بالقرآن"></label><label class="f">اختبار الخاتمات الدوري كل (يوم)<input type="number" id="sardIn" min="1" max="90" value="${sardEvery()}"></label></div><div class="tools"><button class="btn" data-act="saveName" ${S.readOnly?'disabled':''}>حفظ الإعدادات</button></div></section>
   <section class="panel"><div class="ph"><h2 class="grow">الحلقات</h2><button class="btn pri" data-act="newHalaqa" ${S.readOnly?'disabled':''}>حلقة جديدة</button></div>
-    <div class="list">${hs.length?hs.map(h=>{const n=[...S.students.values()].filter(s=>s.halaqa===h.id).length;return `<button class="row" data-act="openHalaqa" data-id="${h.id}"><div style="min-width:0"><div class="nm">${esc(h.name)}</div><div class="sub">${esc(h.teacher||'بدون معلمة')}</div></div><div class="tags"><span class="count">${AR(n)} طالبة</span>${h.demo?'<span class="tag t-demo">تجريبي</span>':''}</div></button>`}).join(''):empty('لا توجد حلقات بعد')}</div></section>
+    <div class="list">${hs.length?hs.map(h=>{const n=[...S.students.values()].filter(s=>s.halaqa===h.id&&s.status!=='dismissed').length;return `<button class="row" data-act="openHalaqa" data-id="${h.id}"><div style="min-width:0"><div class="nm">${esc(h.name)}</div><div class="sub">${esc(h.teacher||'بدون معلمة')}</div></div><div class="tags"><span class="count">${AR(n)} طالبة</span>${h.demo?'<span class="tag t-demo">تجريبي</span>':''}</div></button>`}).join(''):empty('لا توجد حلقات بعد')}</div></section>
   <section class="panel"><h2>البيانات التجريبية</h2><p class="hint" style="margin:0">ترجع المنصة لحالتها الأولى: ٣ حلقات و١٨ طالبة مع حضور واختبارات وتقرير شهري.</p>
     <div class="tools"><button class="btn" data-act="reset">إعادة البيانات التجريبية</button></div></section>`;
 }
@@ -517,7 +543,7 @@ function render(){
   pending=false;reindex();renderHeader();
   const need=Object.keys(COLS);
   if(S.mode==='loading'||(S.mode==='db'&&!need.every(k=>S.loaded[k]))){$('#main').innerHTML='<div class="empty">جارٍ تحميل البيانات…</div>';return}
-  const V={home:vHome,students:vStudents,exams:vExams,khatm:vKhatm,att:vAtt,report:vReport,halaqat:vHalaqat}[S.tab]||vHome;
+  const V={home:vHome,students:vStudents,exams:vExams,khatm:vKhatm,att:vAtt,report:vReport,dis:vDis,halaqat:vHalaqat}[S.tab]||vHome;
   let pre='';
   pre+='<div class="banner" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">نسخة تجريبية للعرض: الأسماء والبيانات وهمية، والتعديلات تُحفظ على هذا الجهاز فقط. جرّبي تغيير «العرض بصفة» من الأعلى لرؤية المنصة كما تراها المعلمة.</span><button class="btn sm" data-act="reset">إعادة البيانات التجريبية</button></div>';
   if(!S.admin&&!S.readOnly)pre+='<div class="banner" style="background:var(--brand-soft);color:var(--brand)">دخولك بصلاحية معلمة: تسجيل الحضور وتعبئة التقرير الشهري. باقي الصفحات للاطلاع فقط.</div>';
@@ -555,6 +581,14 @@ function shStudent(id){
     </fieldset>
     <div class="foot" style="grid-column:1/-1"><div class="l">${s?`<button type="button" class="btn danger ${S.arm==='delS'?'armed':''}" data-act="delStudent">${S.arm==='delS'?'اضغطي للتأكيد':'حذف الطالبة'}</button>`:''}${x.to?'<button type="button" class="btn" data-act="clearExcuse">إنهاء العذر</button>':''}</div><button class="btn pri" type="submit" ${S.readOnly?'disabled':''}>حفظ</button></div>
   </form>
+  ${s?(()=>{const H=(s.history||[]).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));const dis=s.status==='dismissed';
+    return `<div class="ph"><h3 class="grow">الفصل والعودة</h3>${dis?'<span class="tag t-bad">مفصولة حاليًا</span>':H.length?'<span class="tag t-ex">عادت بعد فصل</span>':'<span class="tag t-ok">منتظمة</span>'}</div>
+    ${H.length?`<div class="list">${H.map(x=>`<div class="row static"><div style="min-width:0"><div class="nm">${x.type==='dismissed'?'فُصلت':'عادت'}</div><div class="sub">${esc(x.reason||x.note||'')}</div></div><div class="tags"><span class="tag ${x.type==='dismissed'?'t-bad':'t-ok'}">${fDY(x.date)}</span></div></div>`).join('')}</div>`:''}
+    <form data-form="${dis?'return':'dismiss'}" class="fgrid" style="gap:10px;border:1px dashed var(--line);border-radius:10px;padding:10px">
+      <label class="f">${dis?'تاريخ العودة':'تاريخ الفصل'}<input type="date" name="date" required value="${today()}"></label>
+      <label class="f">${dis?'ملاحظة':'سبب الفصل'}<input type="text" name="reason" placeholder="${dis?'مثال: بطلب وليّة الأمر':'مثال: تكرار الغياب'}"></label>
+      <div class="foot" style="grid-column:1/-1"><span class="hint">${dis?'تعود الطالبة لحلقتها، ويبقى سجل فصلها ظاهرًا في ملفها.':'تختفي الطالبة من الحضور والتنبيهات، ويبقى ملفها محفوظًا.'}</span><button class="btn ${dis?'pri':'danger'}" type="submit" ${S.readOnly?'disabled':''}>${dis?'إعادة الطالبة':'فصل الطالبة'}</button></div>
+    </form>`})():''}
   ${s?`<div class="ph"><h3 class="grow">سجل الاختبارات</h3><button class="btn sm" data-act="newExam" data-sid="${id}" data-kind="five">إضافة اختبار</button></div>
   <div class="list">${ex.length?ex.map(e=>`<button class="row" data-act="openExam" data-id="${e.id}"><div style="min-width:0"><div class="nm">${KIND[e.kind]}${e.milestone&&e.kind!=='tajweed'?' · حتى الجزء '+AR(e.milestone):''}</div><div class="sub">${fD(e.date)}${e.examiner?' · '+esc(e.examiner):''}${e.notes?' · '+esc(e.notes):''}</div></div><div class="tags"><span class="tag ${e.status==='passed'?'t-ok':e.status==='repeat'?'t-bad':'t-sch'}">${STAT[e.status]}</span>${e.grade?`<span class="tag t-k">${esc(e.grade)}</span>`:''}</div></button>`).join(''):empty('لا اختبارات مسجّلة')}</div>`:''}`);
 }
@@ -600,7 +634,7 @@ function shHalaqa(id){
 function shSard(o){
   const x=o.id?S.sard.get(o.id):null;const batch=x?.batch||o.batch;if(!batch)return;
   S.sheet={type:'sard',id:o.id||null,batch};
-  const st=[...S.students.values()].filter(s=>(+s.juz||0)>=30&&s.batch===batch&&(S.admin||s.halaqa===S.role)).sort(byName);
+  const st=[...S.students.values()].filter(s=>(+s.juz||0)>=30&&s.batch===batch&&s.status!=='dismissed'&&(S.admin||s.halaqa===S.role)).sort(byName);
   const R=x?.results||{};
   openSheet(`${shHead('الاختبار الدوري · '+esc(batch))}
   <form data-form="sard" style="display:flex;flex-direction:column;gap:12px">
@@ -662,6 +696,8 @@ async function loadDemo(){
   const studs=names.map((n,i)=>{const j=juz[i];let l5=Math.floor(j/5)*5,l3=Math.floor(j/3)*3;if(S5.has(i))l5-=5;if(S3.has(i))l3-=3;
     const s={name:n,halaqa:H[i%3][0],juz:j,last5:l5,last3:l3,tajweed:LEVELS[i%3],demo:true};
     if(j>=30)s.batch=i<10?'الدفعة الأولى':'الدفعة الثانية';if(i===3)s.khatmaDone=addDays(td,-40);
+    if(i===12){s.status='dismissed';s.history=[{type:'dismissed',date:addDays(td,-20),reason:'تكرار الغياب بدون عذر'}]}
+    if(i===1){s.history=[{type:'dismissed',date:addDays(td,-120),reason:'انقطاع عن الحلقة'},{type:'returned',date:addDays(td,-35),note:'عادت بطلب وليّة الأمر'}]}
     if(i===6)s.excuse={reason:'سفر',from:addDays(td,-3),to:addDays(td,6)};
     return ['demo-s'+i,s]});
   studs.forEach(([id,s])=>T.push(()=>put('students',id,s)));
@@ -673,8 +709,8 @@ async function loadDemo(){
     ['demo-e6',{student:'demo-s2',kind:'tajweed',date:addDays(td,-4),status:'passed',grade:'جيد جدًا'}]];
   exams.forEach(([id,e])=>T.push(()=>put('exams',id,{...e,demo:true})));
   for(let k=0;k<16;k++){const d=addDays(td,-k);const wd=pISO(d).getDay();if(wd===5||wd===6)continue;
-    H.forEach(([hid],hi)=>{const marks={};studs.forEach(([sid,s],i)=>{if(s.halaqa!==hid)return;
-      marks[sid]=excuseOn(s,d)?'e':((i*7+k*3+hi)%11===0?'a':'p')});
+    H.forEach(([hid],hi)=>{const marks={};studs.forEach(([sid,s],i)=>{if(s.halaqa!==hid||s.status==='dismissed')return;
+      marks[sid]=excuseOn(s,d)?'e':((i*7+k*3+hi)%11===0?'a':(i*5+k)%6===0?'t':'p')});
       T.push(()=>put('attendance',`${hid}_${d}`,{halaqa:hid,date:d,marks,demo:true}))})}
   const rows={};studs.filter(([,s])=>s.halaqa==='demo-h1').forEach(([sid,s],i)=>rows[sid]={pages:String(8+i*2),juz:String(s.juz),tajweed:s.tajweed,note:''});
   T.push(()=>put('monthly',`demo-h1_${thisMonth()}`,{halaqa:'demo-h1',month:thisMonth(),rows,note:'حلقة منتظمة هذا الشهر.',submitted:true,applied:true,submittedAt:new Date().toISOString(),demo:true}));
@@ -785,6 +821,13 @@ document.addEventListener('submit',async e=>{
     try{await put('sard',id,d)}catch(err){return}
     toast('حُفظ الاختبار الدوري');closeSheet();
   }
+  if(f.dataset.form==='dismiss'||f.dataset.form==='return'||f.dataset.form==='dismissPick'){
+    const pick=f.dataset.form==='dismissPick';const st=S.students.get(pick?g('student'):S.sheet.id);if(!st){toast('اختاري الطالبة');return}const c=strip(st);const H=[...(c.history||[])];const dis=f.dataset.form!=='return';
+    H.push(dis?{type:'dismissed',date:g('date')||today(),reason:g('reason')}:{type:'returned',date:g('date')||today(),note:g('reason')});
+    c.history=H;c.status=dis?'dismissed':'active';
+    try{await put('students',st.id,c);toast(dis?'فُصلت الطالبة':'عادت الطالبة لحلقتها')}catch(err){return}
+    pick?schedule():shStudent(st.id);
+  }
   if(f.dataset.form==='halaqa'){
     const id=S.sheet.id||newId();const prev=S.halaqat.get(id);
     try{await put('halaqat',id,{...(prev?strip(prev):{}),name:g('name'),teacher:g('teacher')});toast('حُفظت الحلقة')}catch(err){return}closeSheet();
@@ -792,7 +835,7 @@ document.addEventListener('submit',async e=>{
 });
 
 /* ---------- boot ---------- */
-const LS='bilquran-demo-v2';let pt;
+const LS='bilquran-demo-v5';let pt;
 function persist(){clearTimeout(pt);pt=setTimeout(()=>{try{const o={meta:S.meta};for(const k of Object.values(MAPOF))o[k]=[...S[k].values()];localStorage.setItem(LS,JSON.stringify(o))}catch(e){}},300)}
 (async()=>{
   let ok=false;
