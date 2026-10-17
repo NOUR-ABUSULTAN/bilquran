@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="منصة متابعة الحلقات والاختبارات والحضور لأكاديمية بالقرآن">
+<meta name="robots" content="noindex">
 <title>منصة أكاديمية بالقرآن</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -106,13 +106,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--
 .t-k{background:var(--gold-soft);color:var(--gold)}
 .t-ok{background:var(--ok-soft);color:var(--ok)}
 .t-bad{background:var(--bad-soft);color:var(--bad)}
-.t-demo{display:none}
-.role{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--hdr-muted)}
-.role select{background:var(--tan);color:#1c3825;border:0;border-radius:8px;padding:6px 10px;font-weight:600}
-.teacher .hf{display:none}
-.hd .grow{flex:1 1 180px}
-.ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-@media (max-width:700px){.ctl{width:100%}.ctl label{flex:1 1 150px}.ctl select{flex:1;min-width:0}}
+.t-demo{background:none;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .juz{position:relative;height:7px;border-radius:4px;background:var(--sunk);overflow:hidden;grid-column:1 / -1}
 .juz b{position:absolute;inset-block:0;inset-inline-start:0;width:calc(var(--p) * 100%);background:var(--brand);border-radius:4px}
 .juz.done b{background:var(--gold)}
@@ -132,6 +126,10 @@ td.num{text-align:center}
 .mk button[aria-pressed="true"][data-m="e"]{background:var(--gold);border-color:var(--gold);color:var(--surface)}
 .mk button[aria-pressed="true"][data-m="t"]{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
 .teacher .admin-only{display:none!important}
+.who{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--hdr-muted);min-width:0}
+.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.who .btn{background:transparent;color:var(--hdr-ink);border-color:color-mix(in srgb,var(--hdr-ink) 35%,transparent)}
+.who .btn:hover{background:color-mix(in srgb,var(--hdr-ink) 12%,transparent)}
 .t-taj{background:var(--brand-soft);color:var(--brand)}
 .batch{display:flex;flex-direction:column;gap:6px}
 .batch h3{font-family:var(--f-display);font-weight:700;color:var(--gold);font-size:1rem}
@@ -168,6 +166,9 @@ td.num{text-align:center}
 .teacher form[data-form] :is(input,select,textarea){pointer-events:none;background:var(--sunk)}
 </style>
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -181,8 +182,8 @@ td.num{text-align:center}
           <h1 id="acName">أكاديمية بالقرآن</h1>
           <div class="dates" id="dates"></div>
         </div>
-        <div class="ctl"><label class="role">العرض بصفة <select id="role"></select></label>
-        <label class="hf">الحلقة <select id="hf"></select></label></div>
+        <label class="hf">الحلقة <select id="hf"></select></label>
+        <div class="who" id="who" hidden><span id="whoEmail" dir="ltr"></span><button class="btn sm" data-act="signout">خروج</button></div>
       </div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
     </div>
@@ -219,7 +220,7 @@ const TABS=[['home','الرئيسية'],['students','الطالبات'],['exams'
 const COLS={halaqat:'halaqat',students:'students',exams:'exams',att:'attendance',monthly:'monthly',sard:'sard'};
 const MAPOF={halaqat:'halaqat',students:'students',exams:'exams',attendance:'att',monthly:'monthly',sard:'sard'};
 
-const S={mode:'local',db:null,readOnly:false,admin:true,role:'admin',loaded:{},
+const S={mode:'loading',db:null,readOnly:false,admin:false,email:'',myH:[],access:new Map(),admins:[],loaded:{},
   halaqat:new Map(),students:new Map(),exams:new Map(),att:new Map(),monthly:new Map(),sard:new Map(),meta:{},
   tab:'home',hf:'all',q:'',sf:'all',examTab:'five',attTab:'mark',attH:'',attDate:today(),weekOf:weekStart(today()),attMonth:thisMonth(),
   repH:'',repMonth:thisMonth(),drafts:{},sheet:null,arm:null};
@@ -234,17 +235,19 @@ const queues={};
 function enqueue(k,fn){const p=(queues[k]||Promise.resolve()).then(fn,fn);queues[k]=p.catch(()=>{});return p}
 function onErr(e){
   const c=e&&e.code;
-  if(c==='invalid_argument'){S.readOnly=true;toast('لا تملكين صلاحية التعديل على هذه المنصة');schedule();}
-  else if(c==='quota_exceeded')toast('امتلأت مساحة البيانات، احذفي سجلات قديمة ثم أعيدي المحاولة');
+  if(c==='permission-denied')toast('ليس لديكِ صلاحية لهذا الإجراء');
+  else if(c==='resource-exhausted')toast('تجاوزنا الحد اليومي المجاني، حاولي غدًا أو تواصلي مع المسؤولة');
   else toast('لم يُحفظ التغيير، تحققي من الاتصال وأعيدي المحاولة');
 }
+const soon=ms=>new Promise(r=>setTimeout(r,ms));
 function put(col,id,data){
-  if(!S.db){S[MAPOF[col]].set(id,{...data,id});persist();schedule();return Promise.resolve()}
-  return enqueue(col+'/'+id,()=>S.db.collection(col).doc(id).set(data)).catch(e=>{onErr(e);throw e});
+  if(col==='exams'&&!data.halaqa){const st=S.students.get(data.student);if(st)data={...data,halaqa:st.halaqa}}
+  const p=S.db.collection(col).doc(id).set(data);p.catch(onErr);
+  return Promise.race([p,soon(1500)]);
 }
 function del(col,id){
-  if(!S.db){S[MAPOF[col]].delete(id);persist();schedule();return Promise.resolve()}
-  return enqueue(col+'/'+id,()=>S.db.collection(col).doc(id).delete()).catch(e=>{onErr(e);throw e});
+  const p=S.db.collection(col).doc(id).delete();p.catch(onErr);
+  return Promise.race([p,soon(1500)]);
 }
 function strip(o){const c={...o};delete c.id;return c}
 
@@ -252,7 +255,7 @@ function strip(o){const c={...o};delete c.id;return c}
 let IDX={byStudent:new Map()};
 function reindex(){const m=new Map();for(const e of S.exams.values()){if(!m.has(e.student))m.set(e.student,[]);m.get(e.student).push(e)}for(const a of m.values())a.sort((x,y)=>(y.date||'').localeCompare(x.date||''));IDX.byStudent=m}
 const hName=id=>(S.halaqat.get(id)||{}).name||'بدون حلقة';
-const halaqatArr=()=>[...S.halaqat.values()].filter(h=>S.admin||h.id===S.role).sort(byName);
+const halaqatArr=()=>[...S.halaqat.values()].sort(byName);
 function studentsF(h,incl){h=h||S.hf;return [...S.students.values()].filter(s=>(h==='all'||s.halaqa===h)&&(incl||s.status!=='dismissed')).sort(byName)}
 const lastH=(s,t)=>(s.history||[]).filter(x=>x.type===t).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
 function excuseActive(s,on){on=on||today();const x=s.excuse;return x&&x.to&&x.to>=on&&(!x.from||x.from<=addDays(on,30))?x:null}
@@ -327,11 +330,10 @@ const hOpts=(cur,all)=>(all?`<option value="all" ${cur==='all'?'selected':''}>ك
 /* ---------- header ---------- */
 function renderHeader(){
   $('#acName').textContent=S.meta.name||'أكاديمية بالقرآن';
+  $('#who').hidden=!S.email;$('#whoEmail').textContent=S.email;$('.hf').hidden=!(S.mode==='db');$('#tabs').hidden=!(S.mode==='db');
   let hij='';try{hij=new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura',{day:'numeric',month:'long',year:'numeric'}).format(new Date())}catch(e){}
   $('#dates').textContent=new Intl.DateTimeFormat('ar-EG',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date())+(hij?' · '+hij:'');
   if(S.hf!=='all'&&S.loaded.halaqat&&!S.halaqat.has(S.hf))S.hf='all';
-  $('#role').innerHTML=`<option value="admin" ${S.admin?'selected':''}>الإدارة والإشراف</option>`+[...S.halaqat.values()].sort(byName).map(h=>`<option value="${h.id}" ${S.role===h.id?'selected':''}>معلمة ${esc(h.name)}${h.teacher?' ('+esc(h.teacher)+')':''}</option>`).join('');
-  if(!S.admin){S.hf=S.attH=S.repH=S.role}
   $('#hf').innerHTML=hOpts(S.hf,true);
   $('#tabs').innerHTML=TABS.map(([k,l])=>`<button role="tab" data-act="tab" data-v="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('');
 }
@@ -535,9 +537,16 @@ function vHalaqat(){
   const hs=halaqatArr();const hasDemo=[...S.students.values(),...S.halaqat.values()].some(x=>x.demo);
   return `<section class="panel"><h2>إعدادات الأكاديمية</h2><div class="fgrid"><label class="f">اسم الأكاديمية<input type="text" id="acInput" value="${esc(S.meta.name||'')}" placeholder="أكاديمية بالقرآن"></label><label class="f">اختبار الخاتمات الدوري كل (يوم)<input type="number" id="sardIn" min="1" max="90" value="${sardEvery()}"></label></div><div class="tools"><button class="btn" data-act="saveName" ${S.readOnly?'disabled':''}>حفظ الإعدادات</button></div></section>
   <section class="panel"><div class="ph"><h2 class="grow">الحلقات</h2><button class="btn pri" data-act="newHalaqa" ${S.readOnly?'disabled':''}>حلقة جديدة</button></div>
-    <div class="list">${hs.length?hs.map(h=>{const n=[...S.students.values()].filter(s=>s.halaqa===h.id&&s.status!=='dismissed').length;return `<button class="row" data-act="openHalaqa" data-id="${h.id}"><div style="min-width:0"><div class="nm">${esc(h.name)}</div><div class="sub">${esc(h.teacher||'بدون معلمة')}</div></div><div class="tags"><span class="count">${AR(n)} طالبة</span>${h.demo?'<span class="tag t-demo">تجريبي</span>':''}</div></button>`}).join(''):empty('لا توجد حلقات بعد')}</div></section>
-  <section class="panel"><h2>البيانات التجريبية</h2><p class="hint" style="margin:0">ترجع المنصة لحالتها الأولى: ٣ حلقات و١٨ طالبة مع حضور واختبارات وتقرير شهري.</p>
-    <div class="tools"><button class="btn" data-act="reset">إعادة البيانات التجريبية</button></div></section>`;
+    <div class="list">${hs.length?hs.map(h=>{const n=[...S.students.values()].filter(s=>s.halaqa===h.id&&s.status!=='dismissed').length;return `<button class="row" data-act="openHalaqa" data-id="${h.id}"><div style="min-width:0"><div class="nm">${esc(h.name)}</div><div class="sub">${esc(h.teacher||'بدون معلمة')}${(h.teachers||[]).length?' · <span dir="ltr">'+esc(h.teachers.join('، '))+'</span>':' · <span style="color:var(--warn)">لم يُضف إيميل المعلمة</span>'}</div></div><div class="tags"><span class="count">${AR(n)} طالبة</span>${h.demo?'<span class="tag t-demo">تجريبي</span>':''}</div></button>`}).join(''):empty('لا توجد حلقات بعد')}</div></section>
+  <section class="panel admin-only"><h2>الإدارة والإشراف</h2>
+    <p class="hint" style="margin:0">هذه الإيميلات ترى كل الحلقات ولها كل الصلاحيات. المالكة الدائمة: <b dir="ltr">${OWNER}</b></p>
+    <label class="f">إيميلات الإدارة والإشراف (كل إيميل في سطر)<textarea id="adminsIn" dir="ltr" style="min-height:90px">${esc(S.admins.join('\n'))}</textarea></label>
+    <div class="tools"><button class="btn pri" data-act="saveAdmins">حفظ الإيميلات</button></div></section>
+  <section class="panel admin-only"><h2>تصدير البيانات</h2>
+    <p class="hint" style="margin:0">نسخة من بيانات الأكاديمية على جهازك، يمكن فتحها في Excel.</p>
+    <div class="tools"><button class="btn" data-act="exportStudents">الطالبات (Excel)</button><button class="btn" data-act="exportAtt">الحضور (Excel)</button><button class="btn" data-act="exportAll">نسخة احتياطية كاملة</button></div></section>
+  <section class="panel admin-only"><h2>بيانات تجريبية</h2><p class="hint" style="margin:0">لتجربة المنصة قبل إدخال البيانات الحقيقية: ٣ حلقات و١٨ طالبة مع حضور واختبارات. كل ما فيها يحمل وسم «تجريبي».</p>
+    <div class="tools">${hasDemo?`<button class="btn danger ${S.arm==='demoDel'?'armed':''}" data-act="demoDel" ${S.readOnly?'disabled':''}>${S.arm==='demoDel'?'اضغطي للتأكيد: حذف كل البيانات التجريبية':'حذف البيانات التجريبية'}</button>`:`<button class="btn" data-act="demo" ${S.readOnly?'disabled':''}>تعبئة بيانات تجريبية</button>`}</div></section>`;
 }
 
 /* ---------- render loop ---------- */
@@ -551,12 +560,13 @@ function schedule(){
 function render(){
   pending=false;reindex();renderHeader();
   const need=Object.keys(COLS);
+  if(S.mode==='login'){$('#main').innerHTML=`<section class="panel" style="max-width:460px;margin:24px auto;text-align:center;align-items:center;gap:16px"><img class="logo" style="width:96px;height:96px" alt="" src="${document.querySelector('.logo').src}"><h2>الدخول إلى منصة ${esc(S.meta.name||'أكاديمية بالقرآن')}</h2><p class="muted" style="margin:0">ادخلي بحساب Google المسجّل لدى الإدارة.</p><button class="btn pri" data-act="signin" style="padding:10px 22px">الدخول بحساب Google</button></section>`;return}
+  if(S.mode==='noaccess'){$('#main').innerHTML=`<section class="panel" style="max-width:460px;margin:24px auto;text-align:center;align-items:center;gap:12px"><h2>هذا الحساب غير مضاف للمنصة</h2><p class="muted" style="margin:0">دخلتِ بالإيميل <b dir="ltr">${esc(S.email)}</b>. أرسليه للإدارة لتضيفه، ثم أعيدي فتح الصفحة.</p><div class="tools" style="justify-content:center"><button class="btn" data-act="signout">الدخول بحساب آخر</button></div></section>`;return}
   if(S.mode==='loading'||(S.mode==='db'&&!need.every(k=>S.loaded[k]))){$('#main').innerHTML='<div class="empty">جارٍ تحميل البيانات…</div>';return}
   const V={home:vHome,students:vStudents,exams:vExams,khatm:vKhatm,att:vAtt,report:vReport,dis:vDis,halaqat:vHalaqat}[S.tab]||vHome;
   let pre='';
-  pre+='<div class="banner" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">نسخة تجريبية للعرض: الأسماء والبيانات وهمية، والتعديلات تُحفظ على هذا الجهاز فقط. جرّبي تغيير «العرض بصفة» من الأعلى لرؤية المنصة كما تراها المعلمة.</span><button class="btn sm" data-act="reset">إعادة البيانات التجريبية</button></div>';
   if(!S.admin&&!S.readOnly)pre+='<div class="banner" style="background:var(--brand-soft);color:var(--brand)">دخولك بصلاحية معلمة: تسجيل الحضور وتعبئة التقرير الشهري. باقي الصفحات للاطلاع فقط.</div>';
-  if(S.readOnly)pre+='<div class="banner">العرض فقط: تحتاجين صلاحية «مساهم» أو أعلى من صاحبة المنصة لتسجيل البيانات.</div>';
+  if(false)pre+='<div class="banner">العرض فقط: تحتاجين صلاحية «مساهم» أو أعلى من صاحبة المنصة لتسجيل البيانات.</div>';
   $('#main').innerHTML=pre+V();
   if(S.tab==='students')$('#stuList').innerHTML=stuListHTML();
   savePrefs();
@@ -638,7 +648,9 @@ function shHalaqa(id){
   openSheet(`${shHead(h?esc(h.name):'حلقة جديدة')}
   <form data-form="halaqa" class="fgrid" style="gap:12px">
     <label class="f">اسم الحلقة<input type="text" name="name" required value="${esc(h?.name||'')}"></label>
-    <label class="f">المعلمة<input type="text" name="teacher" value="${esc(h?.teacher||'')}"></label>
+    <label class="f">اسم المعلمة<input type="text" name="teacher" value="${esc(h?.teacher||'')}"></label>
+    <label class="f" style="grid-column:1/-1">إيميل المعلمة (Gmail) — لأكثر من معلمة افصلي بفاصلة<input type="text" name="teachers" dir="ltr" inputmode="email" placeholder="teacher@gmail.com" value="${esc((h?.teachers||[]).join(', '))}"></label>
+    <p class="hint" style="margin:0;grid-column:1/-1">المعلمة تدخل بهذا الإيميل وترى هذه الحلقة فقط.</p>
     <div class="foot" style="grid-column:1/-1"><div class="l">${h?(n?`<span class="hint">لا يمكن حذف حلقة فيها ${AR(n)} طالبة</span>`:`<button type="button" class="btn danger ${S.arm==='delH'?'armed':''}" data-act="delHalaqa">${S.arm==='delH'?'اضغطي للتأكيد':'حذف الحلقة'}</button>`):''}</div><button class="btn pri" type="submit" ${S.readOnly?'disabled':''}>حفظ</button></div>
   </form>`);
 }
@@ -681,6 +693,7 @@ async function saveReport(submit,approve){
   const note=$('#repNote');if(note)d.note=note.value;
   const data={...d,halaqa:h,month:m,submitted:submit||!!(S.monthly.get(key)||{}).submitted,updatedAt:new Date().toISOString()};
   if(submit){data.submittedAt=new Date().toISOString();data.applied=!!approve}
+  if(!S.admin)data.applied=false;
   if(S.halaqat.get(h)?.demo)data.demo=true;
   try{await put('monthly',key,data)}catch(e){return}
   if(approve){
@@ -718,7 +731,7 @@ async function loadDemo(){
     ['demo-e4',{student:'demo-s4',kind:'khatma',milestone:30,date:addDays(td,5),status:'scheduled',examiner:'لجنة الأكاديمية'}],
     ['demo-e5',{student:'demo-s13',kind:'three',milestone:18,date:addDays(td,-9),status:'repeat',notes:'تُعاد بعد أسبوعين'}],
     ['demo-e6',{student:'demo-s2',kind:'tajweed',date:addDays(td,-4),status:'passed',grade:'جيد جدًا'}]];
-  exams.forEach(([id,e])=>T.push(()=>put('exams',id,{...e,demo:true})));
+  exams.forEach(([id,e])=>T.push(()=>put('exams',id,{...e,halaqa:((studs.find(x=>x[0]===e.student)||[])[1]||{}).halaqa||'',demo:true})));
   for(let k=0;k<16;k++){const d=addDays(td,-k);const wd=pISO(d).getDay();if(wd===5||wd===6)continue;
     H.forEach(([hid],hi)=>{const marks={};studs.forEach(([sid,s],i)=>{if(s.halaqa!==hid||s.status==='dismissed')return;
       marks[sid]=excuseOn(s,d)?'e':((i*7+k*3+hi)%11===0?'a':(i*5+k)%6===0?'t':'p')});
@@ -736,7 +749,7 @@ async function delDemo(){
   await pool(T);S.drafts={};toast('حُذفت البيانات التجريبية');schedule();
 }
 
-const ADM=new Set(['newSard','delSard','newExam','addStudents','newHalaqa','saveName','demo','demoDel','clearExcuse','delStudent','delExam','delHalaqa','repApprove']);
+const ADM=new Set(['saveAdmins','exportStudents','exportAtt','exportAll','newSard','delSard','newExam','addStudents','newHalaqa','saveName','demo','demoDel','clearExcuse','delStudent','delExam','delHalaqa','repApprove']);
 document.addEventListener('click',async ev=>{
   const b=ev.target.closest('[data-act]');
   if(!b){if(ev.target.id==='sheet')closeSheet();return}
@@ -754,6 +767,12 @@ document.addEventListener('click',async ev=>{
     case 'openHalaqa':shHalaqa(b.dataset.id);break;
     case 'newHalaqa':shHalaqa(null);break;
     case 'close':closeSheet();break;
+    case 'signin':signIn();break;
+    case 'signout':firebase.auth().signOut().then(()=>location.reload());break;
+    case 'saveAdmins':{const list=[...new Set($('#adminsIn').value.split(/[\s,،]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes('@')))];put('meta','access',{admins:list}).then(()=>toast('حُفظت إيميلات الإدارة')).catch(()=>{});break}
+    case 'exportStudents':exportStudents();break;
+    case 'exportAtt':exportAtt();break;
+    case 'exportAll':exportAll();break;
     case 'newSard':shSard({batch:b.dataset.b});break;
     case 'openSard':shSard({id:b.dataset.id});break;
     case 'delSard':if(S.arm!=='delD'){S.arm='delD';reopen()}else{const id=S.sheet.id;S.arm=null;closeSheet();try{await del('sard',id);toast('حُذف الاختبار')}catch(e){}}break;
@@ -765,21 +784,19 @@ document.addEventListener('click',async ev=>{
     case 'repSave':saveReport(false);break;
     case 'repSubmit':saveReport(true,false);break;
     case 'repApprove':if(S.admin)saveReport(true,true);break;
-    case 'saveName':{const n=$('#acInput').value.trim();const se=num($('#sardIn').value,90)||21;if(!S.db){S.meta={...S.meta,name:n,sardEvery:se};persist();render();toast('حُفظت الإعدادات');break}
+    case 'saveName':{const n=$('#acInput').value.trim();const se=num($('#sardIn').value,90)||21;if(!S.db){S.meta={...S.meta,name:n,sardEvery:se};render();break}
       enqueue('meta',()=>S.db.doc('meta/academy').set({...S.meta,name:n,sardEvery:se})).then(()=>toast('حُفظت الإعدادات')).catch(onErr);break}
     case 'demo':loadDemo();break;
-    case 'reset':for(const k of Object.values(MAPOF))S[k]=new Map();S.meta={};S.drafts={};try{localStorage.removeItem(LS)}catch(e){}await loadDemo();break;
     case 'demoDel':if(S.arm!=='demoDel'){S.arm='demoDel';render()}else{S.arm=null;delDemo()}break;
     case 'clearExcuse':{const s=S.students.get(S.sheet.id);const c=strip(s);delete c.excuse;try{await put('students',s.id,c);toast('انتهى العذر')}catch(e){}shStudent(s.id);break}
     case 'delStudent':if(S.arm!=='delS'){S.arm='delS';reopen()}else{const id=S.sheet.id;S.arm=null;closeSheet();try{await del('students',id);toast('حُذفت الطالبة')}catch(e){}}break;
     case 'delExam':if(S.arm!=='delE'){S.arm='delE';reopen()}else{const id=S.sheet.id,back=S.sheet.back;S.arm=null;try{await del('exams',id);toast('حُذف الاختبار')}catch(e){}back?shStudent(back):closeSheet()}break;
-    case 'delHalaqa':if(S.arm!=='delH'){S.arm='delH';reopen()}else{const id=S.sheet.id;S.arm=null;closeSheet();try{await del('halaqat',id);toast('حُذفت الحلقة')}catch(e){}}break;
+    case 'delHalaqa':if(S.arm!=='delH'){S.arm='delH';reopen()}else{const id=S.sheet.id;S.arm=null;closeSheet();try{await del('halaqat',id);toast('حُذفت الحلقة')}catch(e){}setTimeout(syncAccess,400)}break;
   }
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet()});
 document.addEventListener('change',e=>{
   const t=e.target;
-  if(t.id==='role'){S.role=t.value;S.admin=t.value==='admin';if(S.admin){S.hf='all'}else{S.tab=['att','report','home','students','exams','khatm'].includes(S.tab)?S.tab:'home'}document.body.classList.toggle('teacher',!S.admin);closeSheet();render();toast(S.admin?'العرض بصفة الإدارة: كل الصلاحيات':'العرض بصفة المعلمة: حلقتها فقط');return}
   if(t.id==='hf'){S.hf=t.value;render();return}
   if(t.id==='attH'){S.attH=t.value;render()}
   if(t.id==='attDate'&&t.value){S.attDate=t.value;render()}
@@ -804,6 +821,7 @@ document.addEventListener('submit',async e=>{
     const s={...(prev?strip(prev):{}),name:g('name'),halaqa:g('halaqa'),juz:num(g('juz')),last5:num(g('last5')),last3:num(g('last3')),last10:num(g('last10')),last20:num(g('last20')),tajweed:g('tajweed'),batch:g('batch')};
     if(g('exTo'))s.excuse={reason:g('exReason'),from:g('exFrom'),to:g('exTo')};else delete s.excuse;
     if(!s.name)return;try{await put('students',id,s);toast('حُفظ')}catch(err){return}closeSheet();
+    if(prev&&prev.halaqa!==s.halaqa)for(const e of (IDX.byStudent.get(id)||[]))put('exams',e.id,{...strip(e),halaqa:s.halaqa}).catch(()=>{});
   }
   if(f.dataset.form==='bulk'){
     const h=g('halaqa');const lines=g('list').split(/\n/).map(l=>l.trim()).filter(Boolean);
@@ -842,19 +860,84 @@ document.addEventListener('submit',async e=>{
   }
   if(f.dataset.form==='halaqa'){
     const id=S.sheet.id||newId();const prev=S.halaqat.get(id);
-    try{await put('halaqat',id,{...(prev?strip(prev):{}),name:g('name'),teacher:g('teacher')});toast('حُفظت الحلقة')}catch(err){return}closeSheet();
+    const teachers=[...new Set(g('teachers').split(/[,،\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes('@')))];
+    try{await put('halaqat',id,{...(prev?strip(prev):{}),name:g('name'),teacher:g('teacher'),teachers});toast('حُفظت الحلقة')}catch(err){return}closeSheet();
+    setTimeout(syncAccess,400);
   }
 });
 
 /* ---------- boot ---------- */
-const LS='bilquran-demo-v7';let pt;
-function persist(){clearTimeout(pt);pt=setTimeout(()=>{try{const o={meta:S.meta};for(const k of Object.values(MAPOF))o[k]=[...S[k].values()];localStorage.setItem(LS,JSON.stringify(o))}catch(e){}},300)}
-(async()=>{
-  let ok=false;
-  try{const o=JSON.parse(localStorage.getItem(LS)||'null');if(o&&o.students&&o.students.length){for(const k of Object.values(MAPOF))S[k]=new Map((o[k]||[]).map(x=>[x.id,x]));S.meta=o.meta||{};ok=true}}catch(e){}
-  if(!ok){await loadDemo()}
+const OWNER='noorabusultan00@gmail.com';
+const FB={apiKey:"AIzaSyBgGxCpVy7gZEPWk6EOsy3GF21Jf3CZuaU",authDomain:"bilquran.firebaseapp.com",projectId:"bilquran",storageBucket:"bilquran.firebasestorage.app",messagingSenderId:"534523960897",appId:"1:534523960897:web:1a7f0e0b8878ae1979b0c0"};
+firebase.initializeApp(FB);
+const fdb=firebase.firestore();
+try{fdb.enablePersistence({synchronizeTabs:true}).catch(()=>{})}catch(e){}
+S.db=fdb;
+async function signIn(){
+  const pr=new firebase.auth.GoogleAuthProvider();pr.setCustomParameters({prompt:'select_account'});
+  try{await firebase.auth().signInWithPopup(pr)}
+  catch(e){if(e&&/popup|operation-not-supported|cancelled-popup/.test(e.code||'')){try{await firebase.auth().signInWithRedirect(pr)}catch(x){toast('تعذّر الدخول، حاولي مرة أخرى')}}else if(e&&e.code!=='auth/popup-closed-by-user')toast('تعذّر الدخول: '+(e.code||''))}
+}
+const unsubs=[];
+function listen(key,refs){
+  const parts=refs.map(()=>null);let done=0;S.loaded[key]=refs.length===0;
+  if(!refs.length){S[key]=new Map();return}
+  refs.forEach((ref,ix)=>{
+    unsubs.push(ref.onSnapshot(snap=>{
+      parts[ix]=snap.docs?snap.docs.map(d=>[d.id,{...d.data(),id:d.id}]):(snap.exists?[[snap.id,{...snap.data(),id:snap.id}]]:[]);
+      if(!S.loaded[key]&&parts.every(p=>p))S.loaded[key]=true;
+      S[key]=new Map(parts.filter(Boolean).flat());schedule();
+    },err=>{parts[ix]=parts[ix]||[];if(parts.every(p=>p))S.loaded[key]=true;console.warn(key,err&&err.code);schedule()}));
+  });
+}
+async function syncAccess(){
+  if(!S.admin)return;
+  const map={};for(const h of S.halaqat.values())for(const e of (h.teachers||[]))(map[e]=map[e]||[]).includes(h.id)||map[e].push(h.id);
+  const ops=[];
+  for(const [e,hs] of Object.entries(map)){const cur=S.access.get(e);const a=JSON.stringify([...hs].sort()),b=JSON.stringify([...((cur&&cur.halaqat)||[])].sort());if(a!==b)ops.push(()=>fdb.collection('access').doc(e).set({halaqat:hs}))}
+  for(const e of S.access.keys())if(!map[e])ops.push(()=>fdb.collection('access').doc(e).delete());
+  await pool(ops);
+}
+function csv(rows){return '\ufeff'+rows.map(r=>r.map(v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\r\n')}
+function saveFile(name,text,type){const b=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
+function exportStudents(){
+  const rows=[['الاسم','الحلقة','الأجزاء','آخر خمسة','آخر ثلاثة','آخر عشرة','آخر عشرين','التجويد','الدفعة','الحالة','العذر','حتى','تاريخ اعتماد الختمة']];
+  for(const s of [...S.students.values()].sort(byName))rows.push([s.name,hName(s.halaqa),s.juz,s.last5,s.last3,s.last10,s.last20,s.tajweed,s.batch,s.status==='dismissed'?'مفصولة':'منتظمة',(s.excuse||{}).reason,(s.excuse||{}).to,s.khatmaDone]);
+  saveFile('الطالبات-'+today()+'.csv',csv(rows),'text/csv;charset=utf-8');
+}
+function exportAtt(){
+  const L={p:'حاضرة',a:'غائبة',e:'بعذر',t:'تجويد'};const rows=[['التاريخ','الحلقة','الطالبة','الحالة']];
+  for(const a of [...S.att.values()].sort((x,y)=>(x.date||'').localeCompare(y.date||'')))for(const [sid,m] of Object.entries(a.marks||{}))rows.push([a.date,hName(a.halaqa),(S.students.get(sid)||{}).name||sid,L[m]||m]);
+  saveFile('الحضور-'+today()+'.csv',csv(rows),'text/csv;charset=utf-8');
+}
+function exportAll(){
+  const o={exportedAt:new Date().toISOString(),meta:S.meta,admins:S.admins};for(const [col,k] of Object.entries(MAPOF))o[col]=[...S[k].values()];
+  saveFile('نسخة-احتياطية-'+today()+'.json',JSON.stringify(o,null,1),'application/json');
+}
+firebase.auth().onAuthStateChanged(async u=>{
+  unsubs.splice(0).forEach(f=>{try{f()}catch(e){}});
+  if(!u){S.mode='login';S.email='';render();return}
+  S.email=(u.email||'').toLowerCase();S.mode='loading';render();
+  let admin=S.email===OWNER;
+  try{const a=await fdb.doc('meta/access').get();if(a.exists){S.admins=(a.data().admins||[]);if(S.admins.includes(S.email))admin=true}}catch(e){}
+  let myH=[];
+  if(!admin){try{const d=await fdb.collection('access').doc(S.email).get();if(d.exists)myH=d.data().halaqat||[]}catch(e){}
+    if(!myH.length){S.mode='noaccess';render();return}}
+  S.admin=admin;S.myH=myH;document.body.classList.toggle('teacher',!admin);S.mode='db';
+  unsubs.push(fdb.doc('meta/academy').onSnapshot(x=>{S.meta=x.exists?{...x.data()}:{};schedule()},()=>{}));
+  listen('sard',[fdb.collection('sard')]);
+  if(admin){
+    for(const [k,path] of Object.entries(COLS))if(k!=='sard')listen(k,[fdb.collection(path)]);
+    unsubs.push(fdb.collection('access').onSnapshot(x=>{S.access=new Map(x.docs.map(d=>[d.id,d.data()]))},()=>{}));
+    unsubs.push(fdb.doc('meta/access').onSnapshot(x=>{S.admins=x.exists?(x.data().admins||[]):[];schedule()},()=>{}));
+    setTimeout(syncAccess,4000);
+  }else{
+    listen('halaqat',myH.map(h=>fdb.collection('halaqat').doc(h)));
+    for(const k of ['students','exams','att','monthly'])listen(k,myH.map(h=>fdb.collection(COLS[k]).where('halaqa','==',h)));
+    if(myH.length===1)S.hf=myH[0];
+  }
   render();
-})();
+});
 })();
 </script>
 
